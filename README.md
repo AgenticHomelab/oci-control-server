@@ -1,7 +1,9 @@
 # OCI Control Server
 
 Declarative infrastructure and host configuration for a homelab management
-server. **This is a publication candidate**, not a deployment instruction.
+server. This is the published public OCI desired-state source, not a deployment
+controller. Existing private production invocations remain selected until a
+separately reviewed execution-path cutover.
 
 OpenTofu declares the OCI compute, network and infrastructure metadata.
 Ansible declares persistent host configuration, including Omni, Hermes,
@@ -21,8 +23,8 @@ state are managed by their separate owners.
   credentials, and protected consumer-local files preserve current service
   delivery semantics.
 - Original OpenTofu state, S3 backend selectors, native locks, provider
-  identity, and all resource addresses must remain unchanged through
-  publication and any later source cutover.
+  identity, and all resource addresses must remain unchanged when selecting
+  or changing an execution path.
 
 ## Offline review
 
@@ -35,7 +37,11 @@ The generic [OCI Monitoring and Notifications runbook](docs/oci-monitoring-alert
 describes the optional, disabled-by-default alert resources and their separate
 live verification gate.
 
-`docs/private-publication-inputs.md` explains the proposed private input
-contract. The existing private source retains operational recovery evidence.
-Production rollout and repository creation require independent operator
-approval; never run an apply merely to validate source publication.
+`docs/private-publication-inputs.md` explains the private execution-input
+contract. The existing private repository retains operational recovery evidence
+and its separate Hermes operational playbooks. Operator-reported acceptance of
+the published source found an unchanged original-backend, locked and refreshing
+OpenTofu plan and reviewed selected Ansible render parity. This is not evidence
+of an already switched production invocation, off-host recovery, or permission
+to apply changes. Each runtime source switch still requires explicit operator
+approval, correct protected inputs, preserved rollback, and recovery checks.

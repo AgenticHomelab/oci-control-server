@@ -1,4 +1,4 @@
-# Private environment inputs for the clean-history export
+# Private environment inputs for the published OCI source
 
 Production-specific, noncredential host, DNS, OCI Vault selector and
 network inputs live in the private `AgenticHomelab/homelab-secrets` source.
@@ -32,9 +32,11 @@ invocation pass. The Grafana Tailnet role also consumes
 
 OCI Vault remains authoritative for existing stable credential values.
 No secrets, keys, state, or plans belong in the private Git configuration.
-No synchronization daemon, host apply, state migration, or publish operation
-is authorized by this draft. Review and sanitize all remaining source docs,
-templates, test fixtures, and release metadata before public export.
+The published source is a separate sanitized, clean-history export. This
+input contract does not authorize a synchronization daemon, host apply,
+state migration, or production execution-path switch. Review exact source
+revisions, protected inputs, native owners and recovery before changing any
+consumer invocation.
 
 ## Talos receiver TLS inputs
 
@@ -60,8 +62,8 @@ the original Git-declared private values reproduces both former source files
 byte for byte. This does **not** establish effective kernel rule equivalence
 or post-reboot behavior.
 
-The reviewed host role is now provisionally included in the future public
-source export, retaining the existing IPv4 instance-service exceptions,
+The reviewed host role is included in the public source, retaining the
+existing IPv4 instance-service exceptions,
 Tailscale-managed runtime chains, rule order, local etcd restriction and
 SideroLink/public ingress templates. This source review is not an independent
 audit of runtime rules, post-reboot behavior, or console recovery access.
@@ -77,19 +79,21 @@ source. The retrieval helper is rendered from a Jinja template with those same
 paths, and the contributor/token-minter roles consume the same PEM selector.
 Path validation requires regular absolute paths under the protected system
 configuration tree and the two files to share one directory. Preserve the
-existing private path values and key bytes; this is source refactoring only,
-not a credential rotation, file relocation, or host reconciliation.
+existing private path values and key bytes; source publication did not
+rotate credentials or relocate the protected signing key. The separately
+scoped Hermes GitHub App helper update was later deployed and its GitHub API
+and Git HTTPS read access verified for the three public repositories.
 
 The role renders the existing short-lived token minter and repository-restricted Git credential helper from
 Jinja2 templates, preserving the previous allowlist and permissions. Never
-publish these identifying selectors or the signing PEM; do not add the future
-public repository until its installation and scope are separately approved.
+publish these identifying selectors or the signing PEM; authorize any new
+repository installation and token scope separately.
 
 The existing OCI offsite backup bucket name also comes from private Ansible
 inputs. The public Omni access-policy file is a synthetic, non-deployable
 example. The production ACL and Hermes native fleet job identities, schedules
-and prompts remain in the private operations source and are not in the public
-export allowlist. Their native owners and ongoing runtime behavior are
+and prompts remain in the private operations source and were not included
+in the public source. Their native owners and ongoing runtime behavior are
 unchanged. Validate the exact rendered source and current consumers before
 any cutover.
 
