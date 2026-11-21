@@ -1,0 +1,9 @@
+[Unit]
+Description=Record control server unit failure for %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -p daemon.err -t control-health -- Unit %i failed on control-01; inspect systemctl status %i and journalctl -u %i
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true

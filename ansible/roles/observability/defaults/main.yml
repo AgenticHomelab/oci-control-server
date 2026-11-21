@@ -1,0 +1,16 @@
+---
+observability_grafana_version: "13.2.4"
+# Official OSS .deb: patched release precedes publication in signed APT index.
+observability_grafana_build: "38252365904"
+observability_grafana_deb_sha256: "66ff1bcbb830e10e5a776ecadf3264941fe6d9b51ce10a3a07b73fe7517679f8"
+observability_alloy_version: "1.20.1-1"
+observability_vm_version: "v1.154.0"
+observability_vm_archive_sha256: "6dbeb72f924007ebb9abadfd8a555a420950af13631bb32143c5f4e5010dec2d"
+observability_grafana_key_sha256: "d8f5f6f4c174c3b9184cb6ebbf691a2ee69831a109425de4e821f5b43c53a2f8"
+observability_retention: "60d"
+# Cache budget, not a process RSS cap. Leave headroom for application workloads.
+observability_vm_cache_memory: "2GiB"
+observability_vm_min_free_bytes: 21474836480
+observability_instance: control-01
+# Operator supplies this file; Ansible never reads its content or rotates it.
+observability_grafana_password_file: /etc/oci-control-server/grafana/admin-password

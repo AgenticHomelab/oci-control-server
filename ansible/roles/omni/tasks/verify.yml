@@ -1,0 +1,10 @@
+---
+- name: Verify Omni Vault equivalence without cutover
+  tags: [never, omni_auth_vault_verify]
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/oci-omni-auth-credentials, --verify-only]
+  changed_when: false
+  no_log: true
+  when:
+    - omni_auth_secret_source == 'oci_vault'
+    - not ansible_check_mode

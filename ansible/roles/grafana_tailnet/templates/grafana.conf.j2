@@ -1,0 +1,34 @@
+# Independent of Kubernetes; existing Tailnet listener only, never default.
+server {
+    listen {{ tailscale_ipv4_address }}:443 ssl;
+    server_name {{ grafana_tailnet_hostname }};
+    ssl_certificate /etc/letsencrypt/live/{{ grafana_tailnet_hostname }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ grafana_tailnet_hostname }}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # SNI can select this server even with another HTTP Host. Never proxy that.
+    if ($host != {{ grafana_tailnet_hostname }}) { return 421; }
+    if ($http_host !~* "^{{ grafana_tailnet_hostname | replace(".", "\\.") }}(:443)?$") { return 421; }
+    client_max_body_size 16m;
+    client_body_timeout 30s;
+    send_timeout 60s;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host {{ grafana_tailnet_hostname }};
+        proxy_set_header X-Forwarded-Host {{ grafana_tailnet_hostname }};
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Port 443;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        # Preserve native Authorization/Cookie. Never trust client auth-proxy identity.
+        proxy_set_header X-WEBAUTH-USER "";
+        proxy_set_header Forwarded "";
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}

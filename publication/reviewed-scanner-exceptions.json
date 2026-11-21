@@ -1,0 +1,294 @@
+{
+  "schema_version": 1,
+  "description": "Reviewed false positives only. Scanner output is never published. A source blob change invalidates every exception for that file.",
+  "files": {
+    "ansible/group_vars/control.yml": {
+      "reason": "Pinned software checksums and noncredential environment/Vault selectors",
+      "findings": [
+        {
+          "tool": "gitleaks",
+          "rule": "generic-api-key",
+          "line": 37
+        },
+        {
+          "tool": "gitleaks",
+          "rule": "generic-api-key",
+          "line": 70
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Hex High Entropy String",
+          "line": 9
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Hex High Entropy String",
+          "line": 21
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 36
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "103d",
+        "adf4",
+        "d590",
+        "9f2a"
+      ]
+    },
+    "ansible/roles/edge/defaults/main.yml": {
+      "reason": "Default credential-source selection, not a credential value",
+      "findings": [
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 4
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "5337",
+        "b017",
+        "e77d",
+        "34c9"
+      ]
+    },
+    "ansible/roles/edge/tasks/tls.yml": {
+      "reason": "Conditional branches for existing credential sources",
+      "findings": [
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 13
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 49
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "2124",
+        "7fba",
+        "8444",
+        "2d46"
+      ]
+    },
+    "ansible/roles/hermes/defaults/main.yml": {
+      "reason": "Empty/default credential-source metadata",
+      "findings": [
+        {
+          "tool": "gitleaks",
+          "rule": "generic-api-key",
+          "line": 14
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 4
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "07a9",
+        "d7b9",
+        "353d",
+        "f039"
+      ]
+    },
+    "ansible/roles/hermes/tasks/api-vault.yml": {
+      "reason": "Conditional branch for a protected Vault selector",
+      "findings": [
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 10
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "4a91",
+        "33ba",
+        "00de",
+        "896e"
+      ]
+    },
+    "ansible/roles/hermes/tasks/dashboard-credentials.yml": {
+      "reason": "Conditional branch for protected dashboard credentials",
+      "findings": [
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 36
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "ad87",
+        "e52b",
+        "be1c",
+        "5c3d"
+      ]
+    },
+    "ansible/roles/loki/defaults/main.yml": {
+      "reason": "Pinned distribution checksum",
+      "findings": [
+        {
+          "tool": "detect-secrets",
+          "rule": "Hex High Entropy String",
+          "line": 3
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "caac",
+        "7e3b",
+        "b5d7",
+        "6472"
+      ]
+    },
+    "ansible/roles/observability/defaults/main.yml": {
+      "reason": "Pinned upstream distribution checksums",
+      "findings": [
+        {
+          "tool": "gitleaks",
+          "rule": "generic-api-key",
+          "line": 9
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Hex High Entropy String",
+          "line": 5
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Hex High Entropy String",
+          "line": 8
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Hex High Entropy String",
+          "line": 9
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "8374",
+        "4e22",
+        "3216",
+        "2a4c"
+      ]
+    },
+    "ansible/roles/omni/defaults/main.yml": {
+      "reason": "Empty/default credential-source metadata",
+      "findings": [
+        {
+          "tool": "gitleaks",
+          "rule": "generic-api-key",
+          "line": 4
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 2
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "0602",
+        "5322",
+        "9ced",
+        "d577"
+      ]
+    },
+    "ansible/roles/omni/files/oci-omni-auth-credentials": {
+      "reason": "Name of an environment variable used by the verifier",
+      "findings": [
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 303
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "7282",
+        "7b5c",
+        "a18f",
+        "2e5d"
+      ]
+    },
+    "ansible/roles/omni/tasks/vault.yml": {
+      "reason": "Conditional branch for protected Vault retrieval",
+      "findings": [
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 4
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "d5e0",
+        "fef5",
+        "657c",
+        "584b"
+      ]
+    },
+    "ansible/roles/omni/templates/dex.yaml.j2": {
+      "reason": "Jinja expressions for credentials supplied only at runtime",
+      "findings": [
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 11
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 22
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 23
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 24
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "4f9f",
+        "8b51",
+        "0677",
+        "64cd"
+      ]
+    },
+    "ansible/roles/hermes/templates/oci-hermes-github-app-key.j2": {
+      "reason": "Literal PEM headers used to validate the structure of a separately held key",
+      "findings": [
+        {
+          "tool": "gitleaks",
+          "rule": "private-key",
+          "line": 63
+        },
+        {
+          "tool": "gitleaks",
+          "rule": "private-key",
+          "line": 65
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Private Key",
+          "line": 63
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Private Key",
+          "line": 65
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "0432",
+        "77cf",
+        "08c6",
+        "e721"
+      ]
+    }
+  }
+}

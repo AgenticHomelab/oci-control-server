@@ -1,0 +1,46 @@
+# Ansible
+ansible/inventory.ini
+.ansible/
+*.retry
+
+# OpenTofu
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.*
+*.plan
+*.plan.json
+crash.log
+crash.*.log
+
+# Local configuration
+.env
+.env.*
+!.env.example
+.envrc.local
+terraform/backend.hcl
+*.tfvars
+*.tfvars.json
+omni-backup-*.tar.gz
+omni-backup-*.tar.gz.partial
+omni-backup-*.tar.gz.age*
+# Keep exports, rendered configurations and scan reports out of Git.
+/local-artifacts/
+
+# Keys
+*.pem
+*.key
+*.agekey
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Python test artifacts
+__pycache__/

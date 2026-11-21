@@ -1,0 +1,65 @@
+---
+- name: Require pinned GitHub App PEM Vault metadata
+  ansible.builtin.assert:
+    that:
+      - hermes_github_app_vault_secret_ocid is match('^ocid1\.vaultsecret\.[A-Za-z0-9.-]+$')
+      - hermes_github_app_vault_region == 'eu-stockholm-1'
+      - hermes_github_app_vault_version_number is integer
+      - hermes_github_app_vault_version_number > 0
+      - hermes_github_app_allow_key_rotation is boolean
+      - hermes_github_app_key_file is defined
+      - hermes_github_app_metadata_file is defined
+      - hermes_github_app_key_file is match('^/etc/[A-Za-z0-9_./-]+\.pem$')
+      - hermes_github_app_metadata_file is match('^/etc/[A-Za-z0-9_./-]+\.json$')
+      - "'..' not in hermes_github_app_key_file.split('/')"
+      - "'..' not in hermes_github_app_metadata_file.split('/')"
+      - (hermes_github_app_key_file | dirname) == (hermes_github_app_metadata_file | dirname)
+    fail_msg: Supply the reviewed Secret OCID, pinned version, and boolean rotation gate.
+
+- name: Ensure pinned OCI CLI and Python prerequisites
+  ansible.builtin.apt:
+    name: python3-venv
+    state: present
+
+- name: Install existing pinned OCI CLI for PEM materialization
+  ansible.builtin.pip:
+    name: "oci-cli=={{ omni_offsite_backup_oci_cli_version }}"
+    virtualenv: /opt/oci-cli
+    virtualenv_command: /usr/bin/python3 -m venv
+
+- name: Create root-only PEM metadata directory
+  ansible.builtin.file:
+    path: "{{ hermes_github_app_metadata_file | dirname }}"
+    owner: root
+    group: root
+    mode: "0755"
+    state: directory
+
+- name: Install non-secret PEM Vault selector
+  ansible.builtin.copy:
+    dest: "{{ hermes_github_app_metadata_file }}"
+    content: >-
+      {{ {'secret_id': hermes_github_app_vault_secret_ocid,
+          'region': hermes_github_app_vault_region,
+          'version_number': hermes_github_app_vault_version_number,
+          'allow_rotation': hermes_github_app_allow_key_rotation} | to_nice_json }}
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Install root-only PEM Vault retrieval helper
+  ansible.builtin.template:
+    src: oci-hermes-github-app-key.j2
+    dest: /usr/local/sbin/oci-hermes-github-app-key
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Reconcile pinned GitHub App PEM without logging credentials
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/oci-hermes-github-app-key]
+  register: hermes_github_key_reconciliation
+  changed_when: hermes_github_key_reconciliation.stdout == 'changed'
+  no_log: true
+  diff: false
+  when: not ansible_check_mode

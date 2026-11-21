@@ -1,0 +1,143 @@
+---
+- name: Ensure iptables is installed
+  ansible.builtin.apt:
+    name:
+      - iptables
+      - iptables-persistent
+    state: present
+
+- name: Validate private SideroLink IPv6 ingress selectors
+  ansible.builtin.assert:
+    that:
+      - siderolink_ipv6_tcp_ports is defined
+      - siderolink_ipv6_tcp_ports | default([]) | type_debug == 'list'
+      - siderolink_ipv6_tcp_ports | default([]) | length > 0
+      - siderolink_ipv6_tcp_ports | default([]) | map('type_debug') | unique | list == ['int']
+      - siderolink_ipv6_tcp_ports | default([]) | unique | list | length == siderolink_ipv6_tcp_ports | default([]) | length
+      - siderolink_ipv6_tcp_ports | default([0]) | min >= 1
+      - siderolink_ipv6_tcp_ports | default([65536]) | max <= 65535
+      - siderolink_ipv6_tcp_port_range is defined
+      - siderolink_ipv6_tcp_port_range | default('') is match('^[0-9]{1,5}:[0-9]{1,5}$')
+      - (siderolink_ipv6_tcp_port_range | default('0:0')).split(':')[0] | int >= 1
+      - (siderolink_ipv6_tcp_port_range | default('0:0')).split(':')[0] | int <= (siderolink_ipv6_tcp_port_range | default('0:0')).split(':')[1] | int
+      - (siderolink_ipv6_tcp_port_range | default('0:0')).split(':')[1] | int <= 65535
+    fail_msg: SideroLink IPv6 ingress selectors must be bounded private values.
+
+- name: Install deterministic persistent IPv4 firewall baseline
+  ansible.builtin.copy:
+    src: rules.v4
+    dest: /etc/iptables/rules.v4
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/iptables-restore --test %s
+
+- name: Install deterministic persistent IPv6 firewall baseline
+  ansible.builtin.template:
+    src: rules.v6.j2
+    dest: /etc/iptables/rules.v6
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/ip6tables-restore --test %s
+
+- name: Validate public network interface
+  ansible.builtin.assert:
+    that:
+      - 'ansible_facts["default_ipv4"]["interface"] is defined'
+      - 'ansible_facts["default_ipv4"]["interface"] | length > 0'
+    fail_msg: Default IPv4 interface could not be determined
+
+- name: Install public ingress firewall reconciler
+  ansible.builtin.template:
+    src: control-public-ingress.j2
+    dest: /usr/local/sbin/control-public-ingress
+    owner: root
+    group: root
+    mode: "0750"
+  register: public_ingress_script
+
+- name: Install public ingress firewall service
+  ansible.builtin.copy:
+    src: control-public-ingress.service
+    dest: /etc/systemd/system/control-public-ingress.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: public_ingress_service
+
+- name: Enable and reconcile public ingress firewall
+  ansible.builtin.systemd_service:
+    name: control-public-ingress.service
+    enabled: true
+    daemon_reload: "{{ public_ingress_service.changed }}"
+    state: >-
+      {{
+        'restarted'
+        if public_ingress_script.changed or public_ingress_service.changed
+        else 'started'
+      }}
+  when: not ansible_check_mode
+
+- name: Install SideroLink ingress firewall reconciler
+  ansible.builtin.template:
+    src: control-siderolink-ingress.j2
+    dest: /usr/local/sbin/control-siderolink-ingress
+    owner: root
+    group: root
+    mode: "0750"
+  register: host_siderolink_ingress_script
+
+- name: Install SideroLink ingress firewall service
+  ansible.builtin.copy:
+    src: control-siderolink-ingress.service
+    dest: /etc/systemd/system/control-siderolink-ingress.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: host_siderolink_ingress_service
+
+- name: Enable and reconcile SideroLink ingress firewall
+  ansible.builtin.systemd_service:
+    name: control-siderolink-ingress.service
+    enabled: true
+    daemon_reload: "{{ host_siderolink_ingress_service.changed }}"
+    state: >-
+      {{
+        'restarted'
+        if host_siderolink_ingress_script.changed or
+           host_siderolink_ingress_service.changed
+        else 'started'
+      }}
+  when: not ansible_check_mode
+
+- name: Install Omni etcd firewall reconciler
+  ansible.builtin.copy:
+    src: control-omni-etcd
+    dest: /usr/local/sbin/control-omni-etcd
+    owner: root
+    group: root
+    mode: "0750"
+  register: host_omni_etcd_script
+
+- name: Install Omni etcd firewall service
+  ansible.builtin.copy:
+    src: control-omni-etcd.service
+    dest: /etc/systemd/system/control-omni-etcd.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: host_omni_etcd_service
+
+- name: Enable and reconcile Omni etcd firewall
+  ansible.builtin.systemd_service:
+    name: control-omni-etcd.service
+    enabled: true
+    daemon_reload: "{{ host_omni_etcd_service.changed }}"
+    state: >-
+      {{
+        'restarted'
+        if host_omni_etcd_script.changed or host_omni_etcd_service.changed
+        else 'started'
+      }}
+  when: not ansible_check_mode

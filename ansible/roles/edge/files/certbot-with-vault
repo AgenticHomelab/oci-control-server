@@ -1,0 +1,5 @@
+#!/bin/sh
+# A failing refresh must block issuance/renewal, including empty bootstrap.
+set -eu
+/usr/local/sbin/oci-cloudflare-credentials >/dev/null
+exec /usr/bin/certbot "$@"

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IP6TABLES=/usr/sbin/ip6tables
+CHAIN=control-siderolink-ingress
+
+if ! "${IP6TABLES}" -w 5 -nL "${CHAIN}" >/dev/null 2>&1; then
+    "${IP6TABLES}" -w 5 -N "${CHAIN}"
+fi
+
+"${IP6TABLES}" -w 5 -F "${CHAIN}"
+"${IP6TABLES}" -w 5 -A "${CHAIN}" \
+    -i siderolink \
+    -p tcp \
+    -m multiport \
+    --dports {{ siderolink_ipv6_tcp_ports | join(',') }} \
+    -j ACCEPT
+"${IP6TABLES}" -w 5 -A "${CHAIN}" \
+    -i siderolink \
+    -p tcp \
+    --dport {{ siderolink_ipv6_tcp_port_range }} \
+    -j ACCEPT
+"${IP6TABLES}" -w 5 -A "${CHAIN}" -j RETURN
+
+while true; do
+    line="$(
+        "${IP6TABLES}" -w 5 -L INPUT --line-numbers -n |
+        awk -v chain="${CHAIN}" '$2 == chain { print $1; exit }'
+    )"
+
+    [ -n "${line}" ] || break
+    "${IP6TABLES}" -w 5 -D INPUT "${line}"
+done
+
+reject_line="$(
+    "${IP6TABLES}" -w 5 -L INPUT --line-numbers -n |
+    awk '$2 == "REJECT" { print $1; exit }'
+)"
+
+if [ -n "${reject_line}" ]; then
+    "${IP6TABLES}" -w 5 -I INPUT "${reject_line}" -j "${CHAIN}"
+else
+    "${IP6TABLES}" -w 5 -A INPUT -j "${CHAIN}"
+fi

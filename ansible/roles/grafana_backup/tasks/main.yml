@@ -1,0 +1,109 @@
+---
+- name: Assert separate Grafana backup scope and existing OCI settings
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == 'Ubuntu'
+      - ansible_facts['distribution_version'] == '26.04'
+      - ansible_facts['architecture'] == 'aarch64'
+      - ansible_facts['service_mgr'] == 'systemd'
+      - grafana_backup_bucket == omni_offsite_backup_bucket
+      - grafana_backup_namespace == omni_offsite_backup_namespace
+      - grafana_backup_region == omni_offsite_backup_region
+      - grafana_backup_object_prefix == 'grafana'
+      - grafana_backup_calendar | length > 0
+      - omni_offsite_backup_enabled | bool
+    fail_msg: >-
+      Grafana backup requires the existing encrypted OCI offsite destination,
+      its age public recipient, and approved native host tooling.
+
+- name: Inspect required native tools, SQLite state, and public age recipient
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+  loop:
+    - /usr/bin/sqlite3
+    - /usr/bin/age
+    - /opt/oci-cli/bin/oci
+    - /var/lib/grafana/grafana.db
+    - /etc/oci-control-server/backup-age-recipient
+  register: grafana_backup_prerequisites
+
+- name: Require installed native tools and Grafana state before any changes
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false)
+    fail_msg: "Missing native backup prerequisite: {{ item.item }}"
+  loop: "{{ grafana_backup_prerequisites.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Require regular Grafana database and recipient files, not symlinks
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg | default(false)
+      - not (item.stat.islnk | default(true))
+    fail_msg: "Unsafe Grafana state or recipient path: {{ item.item }}"
+  loop: "{{ grafana_backup_prerequisites.results[3:] }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Require a supported Grafana backup destination
+  ansible.builtin.assert:
+    that:
+      - grafana_backup_target in ['oci', 'truenas']
+
+- name: Inspect Garage TLS, credential and transport prerequisites
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+  loop:
+    - /usr/bin/rclone
+    - /etc/oci-control-server/garage-backup-rclone.conf
+    - /etc/oci-control-server/garage-backup-ca.pem
+  register: grafana_truenas_prerequisites
+  when: grafana_backup_target == 'truenas'
+
+- name: Reject missing or unsafe Garage files
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg | default(false)
+      - not (item.stat.islnk | default(true))
+      - item.stat.pw_name == 'root'
+      - >-
+        item.item != '/etc/oci-control-server/garage-backup-rclone.conf'
+        or item.stat.mode == '0600'
+    fail_msg: Garage backup transport or protected credentials missing.
+  loop: "{{ grafana_truenas_prerequisites.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: grafana_backup_target == 'truenas'
+- name: Install native Grafana offsite service
+  ansible.builtin.template:
+    src: grafana-offsite-backup.service.j2
+    dest: /etc/systemd/system/grafana-offsite-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: grafana_backup_service_unit
+
+- name: Install native Grafana offsite timer
+  ansible.builtin.template:
+    src: grafana-offsite-backup.timer.j2
+    dest: /etc/systemd/system/grafana-offsite-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: grafana_backup_timer_unit
+
+- name: Enable only the separate Grafana backup timer
+  ansible.builtin.systemd_service:
+    name: grafana-offsite-backup.timer
+    enabled: true
+    state: "{{ 'restarted' if grafana_backup_timer_unit.changed else 'started' }}"
+    daemon_reload: >-
+      {{ grafana_backup_service_unit.changed or grafana_backup_timer_unit.changed }}
+  when: not ansible_check_mode

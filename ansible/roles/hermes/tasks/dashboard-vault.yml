@@ -1,0 +1,62 @@
+---
+- name: Prepare dashboard Vault verification and retrieval
+  tags: [hermes_dashboard_vault_setup]
+  block:
+    - name: Require real Vault metadata before dashboard cutover
+      ansible.builtin.assert:
+        that:
+          - hermes_dashboard_vault_allow_rotation is boolean
+          - hermes_dashboard_vault_secret_ocid is match('^ocid1\.vaultsecret\.[A-Za-z0-9.-]+$')
+          - hermes_dashboard_vault_region is match('^[a-z]+-[a-z]+-[0-9]+$')
+          - hermes_dashboard_vault_version_number is none or (hermes_dashboard_vault_version_number is integer and hermes_dashboard_vault_version_number > 0)
+        fail_msg: "Dashboard Vault mode requires operator-supplied secret metadata and approved IAM."
+
+    - name: Install dashboard Vault CLI prerequisites
+      ansible.builtin.apt:
+        name: python3-venv
+        state: present
+
+    - name: Ensure existing pinned OCI CLI for dashboard retrieval
+      ansible.builtin.pip:
+        name: "oci-cli=={{ omni_offsite_backup_oci_cli_version }}"
+        virtualenv: /opt/oci-cli
+        virtualenv_command: /usr/bin/python3 -m venv
+
+    - name: Ensure dashboard Vault metadata directory
+      ansible.builtin.file:
+        path: /etc/oci-control-server
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Write non-secret dashboard Vault metadata
+      ansible.builtin.copy:
+        dest: /etc/oci-control-server/vault-hermes-dashboard.json
+        content: >-
+          {{ {'secret_id': hermes_dashboard_vault_secret_ocid,
+              'region': hermes_dashboard_vault_region,
+              'version_number': hermes_dashboard_vault_version_number,
+              'public_url': 'https://' ~ hermes_hostname} | to_nice_json }}
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Install dashboard Vault helper
+      ansible.builtin.copy:
+        src: oci-hermes-dashboard-credentials
+        dest: /usr/local/sbin/oci-hermes-dashboard-credentials
+        owner: root
+        group: root
+        mode: "0700"
+
+- name: Refresh dashboard credentials through Instance Principal
+  ansible.builtin.command:
+    argv: >-
+      {{ ['/usr/local/sbin/oci-hermes-dashboard-credentials'] +
+         (['--allow-rotation'] if hermes_dashboard_vault_allow_rotation else []) }}
+  register: hermes_dashboard_vault_refresh
+  changed_when: hermes_dashboard_vault_refresh.stdout == 'changed'
+  no_log: true
+  diff: false
+  when: not ansible_check_mode

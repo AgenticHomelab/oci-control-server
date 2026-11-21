@@ -1,0 +1,169 @@
+---
+- name: Reconcile Hermes API Vault credential independently
+  ansible.builtin.import_tasks: api-vault.yml
+
+- name: Check whether the Hermes service user exists
+  ansible.builtin.command:
+    cmd: getent passwd hermes
+  register: hermes_user
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Create Hermes service user
+  ansible.builtin.user:
+    name: hermes
+    home: /home/hermes
+    shell: /bin/bash
+    create_home: true
+    system: true
+    password_lock: true
+
+- name: Explain deferred Hermes bootstrap validation
+  ansible.builtin.debug:
+    msg: >-
+      Hermes user-dependent checks are deferred because check mode cannot
+      create the missing service user. Run the play normally, then rerun
+      check mode to validate the configured service.
+  when:
+    - ansible_check_mode
+    - hermes_user.rc != 0
+
+- name: Stop check-mode validation until the Hermes user exists
+  ansible.builtin.meta: end_host
+  when:
+    - ansible_check_mode
+    - hermes_user.rc != 0
+
+- name: Enable lingering for Hermes service user
+  ansible.builtin.command: loginctl enable-linger hermes
+  args:
+    creates: /var/lib/systemd/linger/hermes
+
+- name: Install Hermes Agent
+  become_user: hermes
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/{{ hermes_install_commit }}/scripts/install.sh \
+      | bash -s -- --non-interactive --skip-browser --commit {{ hermes_install_commit }}
+  args:
+    executable: /bin/bash
+    creates: /home/hermes/.local/bin/hermes
+
+- name: Read installed Hermes revision without updating it
+  become: true
+  become_user: hermes
+  ansible.builtin.command:
+    # The git module can reconcile checkout state; this audit must only read.
+    cmd: git -C /home/hermes/.hermes/hermes-agent rev-parse HEAD  # noqa command-instead-of-module
+  register: hermes_installed_revision
+  changed_when: false
+  check_mode: false
+
+- name: Require the reviewed Hermes revision
+  ansible.builtin.assert:
+    that:
+      - hermes_installed_revision.stdout | trim == hermes_install_commit
+    fail_msg: >-
+      Hermes revision differs from the reviewed deployment. Investigate before
+      updating the pin or reinstalling; normal Ansible never upgrades Hermes.
+
+- name: Secure Hermes dashboard credential parent directory
+  tags: [hermes_dashboard_directory_fix, hermes_dashboard_credentials]
+  ansible.builtin.file:
+    path: /home/hermes/.config
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: "0755"
+
+- name: Ensure Hermes systemd user directory exists
+  tags: [hermes_dashboard_credentials]
+  ansible.builtin.file:
+    path: /home/hermes/.config/systemd/user
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: "0755"
+
+- name: Reconcile dashboard credentials from the selected source
+  ansible.builtin.import_tasks: dashboard-credentials.yml
+  tags: [hermes_dashboard_credentials]
+
+- name: Install Hermes dashboard systemd service
+  tags: [hermes_dashboard_credentials]
+  ansible.builtin.template:
+    src: hermes-dashboard.service.j2
+    dest: /home/hermes/.config/systemd/user/hermes-dashboard.service
+    owner: hermes
+    group: hermes
+    mode: "0644"
+  register: hermes_dashboard_unit
+
+- name: Install Hermes gateway systemd service
+  ansible.builtin.template:
+    src: hermes-gateway.service.j2
+    dest: /home/hermes/.config/systemd/user/hermes-gateway.service
+    owner: hermes
+    group: hermes
+    mode: "0644"
+  register: hermes_gateway_unit
+
+- name: Get Hermes user ID
+  tags: [hermes_dashboard_credentials]
+  ansible.builtin.command:
+    cmd: id -u hermes
+  register: hermes_uid
+  changed_when: false
+  check_mode: false
+
+- name: Enable and start Hermes dashboard
+  tags: [hermes_dashboard_credentials]
+  become_user: hermes
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_uid.stdout | trim }}"
+  ansible.builtin.systemd_service:
+    name: hermes-dashboard.service
+    scope: user
+    daemon_reload: true
+    enabled: true
+    state: >-
+      {{
+        'restarted'
+        if (hermes_dashboard_env.changed | default(false))
+        or (hermes_dashboard_vault_refresh.changed | default(false))
+        or hermes_dashboard_unit.changed
+        else 'started'
+      }}
+
+- name: Enable and start Hermes gateway
+  become: true
+  become_user: hermes
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_uid.stdout | trim }}"
+  ansible.builtin.systemd_service:
+    name: hermes-gateway.service
+    scope: user
+    daemon_reload: "{{ hermes_gateway_unit.changed }}"
+    enabled: true
+    state: "{{ 'restarted' if hermes_gateway_unit.changed else 'started' }}"
+
+# Explicit post-acceptance cleanup only. A systemd "started" result cannot
+# prove interactive auth and Chat work. Retain the guard for rollback until
+# those operator-verified gates have passed and cleanup is separately approved.
+- name: Remove obsolete dashboard authentication guard after operator acceptance
+  tags: [never, hermes_dashboard_guard_cleanup]
+  when: hermes_dashboard_guard_cleanup_approved | default(false) | bool
+  ansible.builtin.file:
+    path: /usr/local/libexec/hermes-dashboard-guard
+    state: absent
+
+- name: Materialize approved GitHub App signing PEM only when enabled
+  ansible.builtin.import_tasks: github-app-key.yml
+  tags: [hermes_github_app_key]
+  when: hermes_github_app_key_enabled | default(false) | bool
+
+- name: Prepare Hermes GitHub App contributor identity only when enabled
+  ansible.builtin.import_tasks: github-app.yml
+  tags: [hermes_github_app]
+  when: hermes_github_app_enabled | default(false) | bool

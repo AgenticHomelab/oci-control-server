@@ -1,0 +1,95 @@
+---
+# Execute only when explicitly enabled and the root PEM is provisioned.
+- name: Require approved private GitHub App repository selectors
+  ansible.builtin.assert:
+    that:
+      - hermes_github_app_id | default(0) | int > 0
+      - hermes_github_app_legacy_installation_id | default(0) | int > 0
+      - hermes_github_app_organization_installation_id | default(0) | int > 0
+      - hermes_github_app_legacy_repositories is defined
+      - hermes_github_app_legacy_repositories | default({}) | type_debug == 'dict'
+      - hermes_github_app_legacy_repositories | default({}) | length > 0
+      - hermes_github_app_organization_repositories is defined
+      - hermes_github_app_organization_repositories | default({}) | type_debug == 'dict'
+      - hermes_github_app_organization_repositories | default({}) | length > 0
+      - hermes_github_app_key_file is defined
+      - hermes_github_app_key_file is match('^/etc/[A-Za-z0-9_./-]+\.pem$')
+      - "'..' not in hermes_github_app_key_file.split('/')"
+    fail_msg: Supply the protected GitHub App installation and repository selectors.
+
+- name: Validate reviewed root-only GitHub App key exists
+  ansible.builtin.stat:
+    path: "{{ hermes_github_app_key_file }}"
+    follow: false
+    get_checksum: false
+  register: github_app_pem
+
+- name: Refuse missing or insecure GitHub App PEM
+  ansible.builtin.assert:
+    that:
+      - github_app_pem.stat.exists | default(false)
+      - github_app_pem.stat.isreg | default(false)
+      - github_app_pem.stat.pw_name == 'root'
+      - github_app_pem.stat.gr_name == 'root'
+      - github_app_pem.stat.mode == '0600'
+    fail_msg: Install the root-owned OCI Vault materialization before enabling this role.
+
+- name: Check for existing Hermes-local git and gh executables
+  ansible.builtin.stat:
+    path: "/home/hermes/.local/bin/{{ item }}"
+    follow: false
+    get_checksum: false
+  register: hermes_github_local_commands
+  loop: [git, gh]
+
+- name: Refuse to overwrite executables not previously managed by root
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isreg and item.stat.pw_name == 'root')
+    fail_msg: Review the existing Hermes-local command before replacing it.
+  loop: "{{ hermes_github_local_commands.results }}"
+
+- name: Ensure credential helper directory
+  ansible.builtin.file:
+    path: /usr/local/libexec
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install token minter
+  ansible.builtin.template:
+    src: hermes-github-app-token.j2
+    dest: /usr/local/libexec/hermes-github-app-token
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Authorize default and repository-scoped token minting for Hermes
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/hermes-github-app
+    content: |
+      Defaults!/usr/local/libexec/hermes-github-app-token !log_input, !log_output
+      hermes ALL=(root) NOPASSWD: /usr/local/libexec/hermes-github-app-token ""
+      hermes ALL=(root) NOPASSWD: /usr/local/libexec/hermes-github-app-token ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+
+- name: Install repository-scoped Git credential helper
+  ansible.builtin.template:
+    src: hermes-github-git-credential.j2
+    dest: /usr/local/libexec/hermes-github-git-credential
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install Hermes-only git and gh wrappers
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/home/hermes/.local/bin/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop: [gh, git]

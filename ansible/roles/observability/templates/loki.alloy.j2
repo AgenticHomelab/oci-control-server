@@ -1,0 +1,15 @@
+// Phase 1: exact unit matches, MESSAGE only; no broad journal reader.
+{% for component, unit in [('grafana', 'grafana-server'), ('victoriametrics', 'victoriametrics'), ('alloy', 'alloy')] %}
+loki.source.journal "{{ component }}" {
+  matches = "_SYSTEMD_UNIT={{ unit }}.service"
+  max_age = "1m"
+  format_as_json = false
+  labels = {host = "{{ observability_instance }}", job = "control/journal", unit = "{{ unit }}.service"}
+  forward_to = [loki.write.local.receiver]
+}
+{% endfor %}
+loki.write "local" {
+  endpoint {
+    url = "http://127.0.0.1:3100/loki/api/v1/push"
+  }
+}

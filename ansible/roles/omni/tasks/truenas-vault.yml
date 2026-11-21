@@ -1,0 +1,45 @@
+---
+- name: Read the pinned Garage credential bundle from operator OCI Vault
+  ansible.builtin.command:
+    argv:
+      - oci
+      - secrets
+      - secret-bundle
+      - get
+      - --secret-id
+      - "{{ truenas_backup_s3_vault_secret_ocid }}"
+      - --version-number
+      - "{{ truenas_backup_s3_vault_version | string }}"
+      - --query
+      - 'data."secret-bundle-content".content'
+      - --raw-output
+  delegate_to: localhost
+  become: false
+  register: truenas_backup_vault_bundle_b64
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Decode the Vault bundle in controller memory
+  ansible.builtin.set_fact:
+    truenas_backup_vault_bundle: >-
+      {{ truenas_backup_vault_bundle_b64.stdout | b64decode | from_json }}
+  no_log: true
+
+- name: Validate the selected Garage credential bundle
+  ansible.builtin.assert:
+    that:
+      - truenas_backup_vault_bundle.schema_version | int == 1
+      - truenas_backup_vault_bundle.access_key_id is string
+      - truenas_backup_vault_bundle.access_key_id | length >= 12
+      - truenas_backup_vault_bundle.secret_access_key is string
+      - truenas_backup_vault_bundle.secret_access_key | length >= 12
+      - truenas_backup_vault_bundle | length == 3
+    fail_msg: Pinned Garage Vault bundle has an unsupported schema.
+  no_log: true
+
+- name: Select the verified Vault credentials for this one host
+  ansible.builtin.set_fact:
+    truenas_backup_s3_access_key_id: "{{ truenas_backup_vault_bundle.access_key_id }}"
+    truenas_backup_s3_secret_access_key: "{{ truenas_backup_vault_bundle.secret_access_key }}"
+  no_log: true

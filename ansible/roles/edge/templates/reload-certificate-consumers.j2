@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+if systemctl is-active --quiet nginx.service; then
+  /usr/sbin/nginx -t
+  systemctl reload nginx.service
+fi
+
+if [ "${RENEWED_LINEAGE:-}" = "/etc/letsencrypt/live/{{ omni_certificate_name }}" ]; then
+  systemctl is-active --quiet docker.service
+  /usr/bin/docker compose \
+    --project-directory /opt/omni \
+    --env-file /opt/omni/.env \
+    up -d --no-deps --force-recreate dex
+fi

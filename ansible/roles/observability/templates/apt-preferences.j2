@@ -1,0 +1,16 @@
+# Managed by Ansible. Other versions cannot be selected implicitly.
+Package: grafana
+Pin: version {{ observability_grafana_version }}
+Pin-Priority: 990
+
+Package: grafana
+Pin: version *
+Pin-Priority: -1
+
+Package: alloy
+Pin: version {{ observability_alloy_version }}
+Pin-Priority: 990
+
+Package: alloy
+Pin: version *
+Pin-Priority: -1

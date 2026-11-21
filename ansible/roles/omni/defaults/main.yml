@@ -1,0 +1,8 @@
+---
+omni_auth_secret_source: environment
+omni_auth_vault_secret_ocid: ""
+omni_auth_vault_region: eu-stockholm-1
+omni_auth_vault_version_number: null
+
+# Opt in only after the public Garage CA is installed and a scoped Omni restart is approved.
+omni_garage_ca_mount_enabled: false

@@ -1,0 +1,11 @@
+---
+- name: Configure Cloudflare DNS
+  ansible.builtin.import_tasks: dns.yml
+
+- name: Configure TLS certificates
+  ansible.builtin.import_tasks: tls.yml
+  tags:
+    - edge_tls
+
+- name: Configure nginx
+  ansible.builtin.import_tasks: nginx.yml

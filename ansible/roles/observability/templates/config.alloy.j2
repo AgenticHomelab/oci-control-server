@@ -1,0 +1,41 @@
+// Native host collection only. No textfile or legacy health-script input.
+prometheus.exporter.unix "host" {
+  set_collectors = ["cpu", "meminfo", "filesystem", "diskstats", "netdev", "netclass", "loadavg", "uname", "stat", "time", "systemd"]
+  systemd {
+    enable_restarts = true
+    start_time = true
+  }
+  filesystem {
+    fs_types_exclude = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|nsfs|overlay|proc|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
+    mount_points_exclude = "^/(dev|proc|run/credentials/.+|sys|var/lib/docker/.+)($|/)"
+  }
+}
+
+discovery.relabel "host" {
+  targets = prometheus.exporter.unix.host.targets
+  rule {
+    target_label = "instance"
+    replacement = "{{ observability_instance }}"
+  }
+  rule {
+    target_label = "job"
+    replacement = "control/host"
+  }
+}
+
+prometheus.scrape "host" {
+  targets = discovery.relabel.host.output
+  forward_to = [prometheus.remote_write.local.receiver]
+  scrape_interval = "30s"
+  scrape_timeout = "10s"
+}
+
+prometheus.remote_write "local" {
+  endpoint {
+    url = "http://127.0.0.1:8428/api/v1/write"
+  }
+}
+
+{% if (observability_loki_marker | default({})).get("stat", {}).get("exists", false) %}
+{% include 'loki.alloy.j2' %}
+{% endif %}

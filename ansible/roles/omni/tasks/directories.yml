@@ -1,0 +1,23 @@
+---
+- name: Create Omni base directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: /opt/omni
+      mode: "0750"
+    - path: /opt/omni/config
+      mode: "0750"
+    - path: /opt/omni/data
+      mode: "0750"
+    - path: /opt/omni/data/etcd
+      mode: "0700"
+    - path: /opt/omni/data/sqlite
+      mode: "0700"
+    - path: /opt/omni/secrets
+      mode: "0750"
+    - path: /opt/omni/backups
+      mode: "0700"

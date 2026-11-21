@@ -1,0 +1,182 @@
+---
+- name: Install Tailscale repository signing key
+  ansible.builtin.get_url:
+    url: https://pkgs.tailscale.com/stable/ubuntu/{{ ansible_facts["distribution_release"] }}.noarmor.gpg
+    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    mode: "0644"
+
+- name: Configure Tailscale repository
+  ansible.builtin.get_url:
+    url: https://pkgs.tailscale.com/stable/ubuntu/{{ ansible_facts["distribution_release"] }}.tailscale-keyring.list
+    dest: /etc/apt/sources.list.d/tailscale.list
+    mode: "0644"
+
+- name: Install Tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+    update_cache: true
+
+- name: Read installed package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Enable and start Tailscale
+  ansible.builtin.systemd_service:
+    name: tailscaled
+    enabled: true
+    state: started
+  when: not ansible_check_mode or 'tailscale' in ansible_facts.packages
+
+- name: Check Tailscale state
+  ansible.builtin.command:
+    cmd: tailscale status --json
+  register: tailscale_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: not ansible_check_mode or 'tailscale' in ansible_facts.packages
+
+- name: Read Tailscale backend state
+  ansible.builtin.set_fact:
+    tailscale_backend_state: >-
+      {{
+        (tailscale_status.stdout | from_json).BackendState
+        if tailscale_status.rc | default(1) == 0 and
+           tailscale_status.stdout | default('') | length > 0
+        else ""
+      }}
+
+- name: Require supported credential transport for Tailscale bootstrap
+  ansible.builtin.assert:
+    that:
+      - ansible_connection | default('ssh') == 'ssh'
+      - not lookup('ansible.builtin.config', 'DEFAULT_KEEP_REMOTE_FILES') | bool
+      - not lookup('ansible.builtin.config', 'DEFAULT_DEBUG') | bool
+      - ansible_become_method | default('sudo') == 'sudo'
+    fail_msg: >-
+      Tailscale bootstrap requires SSH pipelining and sudo without requiretty;
+      remote module retention and Ansible debug must be disabled.
+  when: tailscale_backend_state != "Running"
+
+- name: Require valid Tailscale OAuth bootstrap inputs
+  ansible.builtin.assert:
+    that:
+      - tailscale_oauth_client_secret is match('^tskey-client-[A-Za-z0-9_-]{16,512}$')
+      - tailscale_hostname is match('^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$')
+      - tailscale_advertise_tags is match('^tag:[A-Za-z0-9_-]+(,tag:[A-Za-z0-9_-]+)*$')
+    fail_msg: "Tailscale bootstrap credentials or parameters are invalid."
+  when: tailscale_backend_state != "Running"
+  no_log: true
+
+# Use the upstream CLI's file:<path> feature to read a secret on stdin. The
+# Ansible command module pipes stdin, so no on-disk key or Python helper.
+- name: Join Tailscale
+  vars:
+    ansible_ssh_pipelining: true
+  ansible.builtin.command:
+    argv:
+      # Retain the old helper's RLIMIT_CORE=0 safeguard using util-linux.
+      - /usr/bin/prlimit
+      - --core=0:0
+      - --
+      - /usr/bin/timeout
+      - --signal=TERM
+      - --kill-after=5s
+      - 90s
+      - /usr/bin/tailscale
+      - up
+      - --auth-key=file:/dev/stdin
+      - "--hostname={{ tailscale_hostname }}"
+      - "--advertise-tags={{ tailscale_advertise_tags }}"
+      - --accept-dns=false
+      - --accept-routes=false
+      - --timeout=60s
+    stdin: "{{ tailscale_oauth_client_secret }}?ephemeral=false&preauthorized=true"
+    stdin_add_newline: false
+  when: tailscale_backend_state != "Running"
+  changed_when: true
+  no_log: true
+  diff: false
+
+- name: Explain deferred Tailscale bootstrap validation
+  ansible.builtin.debug:
+    msg: >-
+      Connected-state checks are deferred because check mode cannot join this
+      host to Tailscale. Run the play normally, then rerun check mode to
+      validate preferences, address discovery, and dependent edge services.
+  when:
+    - ansible_check_mode
+    - tailscale_backend_state != "Running"
+
+- name: Stop check-mode validation until Tailscale is connected
+  ansible.builtin.meta: end_host
+  when:
+    - ansible_check_mode
+    - tailscale_backend_state != "Running"
+
+- name: Check Tailscale state after bootstrap
+  ansible.builtin.command:
+    cmd: tailscale status --json
+  register: tailscale_status_after_bootstrap
+  changed_when: false
+  check_mode: false
+  when: tailscale_backend_state != "Running"
+
+- name: Record Tailscale state after bootstrap
+  ansible.builtin.set_fact:
+    tailscale_backend_state: >-
+      {{ (tailscale_status_after_bootstrap.stdout | from_json).BackendState }}
+  when: tailscale_backend_state != "Running"
+
+- name: Verify Tailscale is connected
+  ansible.builtin.assert:
+    that:
+      - tailscale_backend_state == "Running"
+    fail_msg: "Tailscale did not reach the Running state after bootstrap."
+
+- name: Read Tailscale preferences
+  ansible.builtin.command:
+    cmd: tailscale debug prefs
+  register: tailscale_prefs
+  changed_when: false
+  check_mode: false
+
+- name: Disable Tailscale DNS
+  ansible.builtin.command:
+    cmd: tailscale set --accept-dns=false
+  when: (tailscale_prefs.stdout | from_json).CorpDNS | bool
+  changed_when: true
+
+- name: Disable Tailscale route acceptance
+  ansible.builtin.command:
+    cmd: tailscale set --accept-routes=false
+  when: (tailscale_prefs.stdout | from_json).RouteAll | bool
+  changed_when: true
+
+- name: Get Tailscale IPv4 address
+  tags:
+    - cloudflare_dns
+  ansible.builtin.command:
+    cmd: tailscale ip -4
+  register: tailscale_ipv4
+  changed_when: false
+  check_mode: false
+
+- name: Record Tailscale IPv4 address
+  ansible.builtin.set_fact:
+    tailscale_ipv4_address: "{{ tailscale_ipv4.stdout | trim }}"
+
+- name: Validate Tailscale IPv4 address
+  ansible.builtin.assert:
+    that:
+      - tailscale_ipv4.stdout_lines | length == 1
+      - >-
+        tailscale_ipv4_address is match(
+        '^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$'
+        )
+    fail_msg: Tailscale did not return exactly one valid IPv4 address
+
+- name: Show Tailscale IPv4 address
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} Tailscale IPv4: {{ tailscale_ipv4_address }}"

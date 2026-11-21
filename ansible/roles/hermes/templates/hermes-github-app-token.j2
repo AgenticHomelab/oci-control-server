@@ -1,0 +1,134 @@
+#!/usr/bin/python3
+"""Root-mediated GitHub App installation token for the Hermes service user."""
+import base64
+import datetime
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import urllib.request
+
+APP_ID = {{ hermes_github_app_id | int }}
+LEGACY_INSTALLATION_ID = {{ hermes_github_app_legacy_installation_id | int }}
+ORGANIZATION_INSTALLATION_ID = {{ hermes_github_app_organization_installation_id | int }}
+LEGACY_REPOS = {{ hermes_github_app_legacy_repositories | to_json }}
+ORGANIZATION_REPOS = {{ hermes_github_app_organization_repositories | to_json }}
+PERMISSIONS = {"contents": "write", "pull_requests": "write",
+               "issues": "write", "actions": "read", "checks": "read",
+               "statuses": "read", "workflows": "write"}
+KEY = {{ hermes_github_app_key_file | to_json }}
+
+
+class TokenError(Exception):
+    pass
+
+
+def safe_key(path):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_nlink != 1 or not 500 <= info.st_size <= 16384):
+            raise TokenError()
+    finally:
+        os.close(fd)
+
+
+def jwt(now):
+    def part(data):
+        raw = json.dumps(data, separators=(",", ":")).encode("ascii")
+        return base64.urlsafe_b64encode(raw).rstrip(b"=")
+    signed = part({"alg": "RS256", "typ": "JWT"}) + b"." + part({
+        "iat": now - 60, "exp": now + 540, "iss": str(APP_ID)})
+    signature = subprocess.run(
+        ["/usr/bin/openssl", "dgst", "-sha256", "-sign", KEY],
+        input=signed, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        timeout=8, check=False, env={"PATH": "/usr/bin:/bin"})
+    if signature.returncode or not signature.stdout:
+        raise TokenError()
+    return (signed + b"." + base64.urlsafe_b64encode(
+        signature.stdout).rstrip(b"=")).decode("ascii")
+
+
+def mint(repository=None):
+    if repository is None:
+        installation_id = LEGACY_INSTALLATION_ID
+        repository_ids = list(LEGACY_REPOS.values())
+    else:
+        name = repository.lower()
+        if name in LEGACY_REPOS:
+            installation_id = LEGACY_INSTALLATION_ID
+            repository_ids = [LEGACY_REPOS[name]]
+        elif name in ORGANIZATION_REPOS:
+            installation_id = ORGANIZATION_INSTALLATION_ID
+            repository_ids = [ORGANIZATION_REPOS[name]]
+        else:
+            raise TokenError()
+
+    safe_key(KEY)
+    now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+    request = urllib.request.Request(
+        "https://api.github.com/app/installations/"
+        + str(installation_id) + "/access_tokens",
+        data=json.dumps({"repository_ids": repository_ids,
+                         "permissions": PERMISSIONS}).encode("utf-8"),
+        headers={"Accept": "application/vnd.github+json",
+                 "Authorization": "Bearer " + jwt(now),
+                 "X-GitHub-Api-Version": "2026-03-10",
+                 "Content-Type": "application/json"},
+        method="POST")
+    # Do not allow the caller to redirect root's request via proxy variables.
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, request, fp, code, msg, headers, url):
+            raise TokenError()
+
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), NoRedirect())
+    with opener.open(request, timeout=12) as response:
+        if response.status != 201:
+            raise TokenError()
+        data = response.read(32769)
+    if len(data) > 32768:
+        raise TokenError()
+    result = json.loads(data)
+    repositories = result.get("repositories")
+    if (not isinstance(repositories, list)
+            or len(repositories) != len(repository_ids)
+            or {entry["id"] for entry in repositories} != set(repository_ids)):
+        raise TokenError()
+    grants = result.get("permissions")
+    if (not isinstance(grants, dict)
+            or any(grants.get(k) != v for k, v in PERMISSIONS.items())
+            or any(k not in PERMISSIONS and (k != "metadata" or v != "read")
+                   for k, v in grants.items())):
+        raise TokenError()
+    expires = datetime.datetime.fromisoformat(
+        result["expires_at"].replace("Z", "+00:00"))
+    remain = (expires - datetime.datetime.now(
+        datetime.timezone.utc)).total_seconds()
+    value = result["token"]
+    if (not 300 <= remain <= 3900 or not isinstance(value, str)
+            or not re.fullmatch(r"[^\s\x00-\x1f]{10,8192}", value)):
+        raise TokenError()
+    return value
+
+
+def main():
+    try:
+        if os.geteuid() != 0 or len(sys.argv) > 2:
+            raise TokenError()
+        os.umask(0o077)
+        os.chdir("/")
+        os.environ.clear()
+        print(mint(sys.argv[1] if len(sys.argv) == 2 else None))
+        return 0
+    except BaseException:
+        print("Hermes GitHub App token unavailable", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

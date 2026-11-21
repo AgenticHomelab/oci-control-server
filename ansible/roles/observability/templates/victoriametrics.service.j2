@@ -1,0 +1,30 @@
+[Unit]
+Description=VictoriaMetrics Single host metrics storage
+Documentation=https://docs.victoriametrics.com/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=victoriametrics
+Group=victoriametrics
+ExecStart=/opt/victoriametrics/{{ observability_vm_version }}/victoria-metrics-prod -httpListenAddr=127.0.0.1:8428 -storageDataPath=/var/lib/victoriametrics -retentionPeriod={{ observability_retention }} -memory.allowedBytes={{ observability_vm_cache_memory }} -storage.minFreeDiskSpaceBytes={{ observability_vm_min_free_bytes }}
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=120s
+LimitNOFILE=65536
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/victoriametrics
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

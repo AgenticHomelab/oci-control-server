@@ -1,0 +1,6 @@
+# Managed only by grafana-tailnet.yml; remove through scoped rollback.
+[Service]
+Environment="GF_SERVER_DOMAIN={{ grafana_tailnet_hostname }}"
+Environment="GF_SERVER_ROOT_URL=https://{{ grafana_tailnet_hostname }}/"
+Environment="GF_SERVER_ENFORCE_DOMAIN=true"
+Environment="GF_SECURITY_COOKIE_SECURE=true"

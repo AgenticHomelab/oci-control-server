@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IPTABLES=/usr/sbin/iptables
+CHAIN=control-omni-etcd
+
+if ! "${IPTABLES}" -w 5 -nL "${CHAIN}" >/dev/null 2>&1; then
+    "${IPTABLES}" -w 5 -N "${CHAIN}"
+fi
+
+"${IPTABLES}" -w 5 -F "${CHAIN}"
+"${IPTABLES}" -w 5 -A "${CHAIN}" \
+    -d 127.0.0.1/32 \
+    -p tcp \
+    --dport 2379 \
+    -m owner \
+    ! --uid-owner 0 \
+    -j REJECT \
+    --reject-with tcp-reset
+"${IPTABLES}" -w 5 -A "${CHAIN}" -j RETURN
+
+while true; do
+    line="$(
+        "${IPTABLES}" -w 5 -L OUTPUT --line-numbers -n |
+        awk -v chain="${CHAIN}" '$2 == chain { print $1; exit }'
+    )"
+
+    [ -n "${line}" ] || break
+    "${IPTABLES}" -w 5 -D OUTPUT "${line}"
+done
+
+"${IPTABLES}" -w 5 -I OUTPUT 1 -j "${CHAIN}"

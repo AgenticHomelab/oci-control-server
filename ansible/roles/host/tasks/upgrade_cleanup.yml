@@ -1,0 +1,20 @@
+---
+- name: Read cloud-init conffile state
+  ansible.builtin.command:
+    argv:
+      - dpkg-query
+      - --show
+      - "--showformat=${Conffiles}\n"
+      - cloud-init
+  register: host_cloud_init_conffiles
+  changed_when: false
+  check_mode: false
+
+- name: Remove obsolete cloud-init logrotate conffile
+  ansible.builtin.file:
+    path: /etc/logrotate.d/cloud-init
+    state: absent
+  when: >-
+    host_cloud_init_conffiles.stdout is regex(
+      '(?m)^ /etc/logrotate[.]d/cloud-init [0-9a-f]+ obsolete$'
+    )

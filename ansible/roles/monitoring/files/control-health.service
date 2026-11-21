@@ -1,0 +1,16 @@
+[Unit]
+Description=Read-only control server service and backup health checks
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/control-health
+TimeoutStartSec=4min
+StateDirectory=control-health
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/control-health

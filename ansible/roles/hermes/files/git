@@ -1,0 +1,8 @@
+#!/bin/sh
+# Inject a repo-restricted helper only for github.com; preserve other hosts.
+set -eu
+exec /usr/bin/git \
+    -c credential.https://github.com.helper= \
+    -c 'credential.https://github.com.helper=!/usr/local/libexec/hermes-github-git-credential' \
+    -c credential.https://github.com.useHttpPath=true \
+    "$@"

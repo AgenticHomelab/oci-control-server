@@ -1,0 +1,10 @@
+---
+# Separate authorization and credential bootstrap required; no routine host import.
+- name: Configure private Talos Loki ingestion on the existing receiver
+  hosts: control
+  become: true
+  gather_facts: false
+  roles:
+    - role: talos_metrics_receiver
+      vars:
+        talos_logs_receiver_deploy: true

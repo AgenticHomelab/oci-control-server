@@ -1,0 +1,65 @@
+---
+- name: Ensure health configuration directory exists
+  ansible.builtin.file:
+    path: /etc/oci-control-server
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install read-only health probe
+  ansible.builtin.copy:
+    src: control-health
+    dest: /usr/local/sbin/control-health
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure health probes
+  ansible.builtin.template:
+    src: health.json.j2
+    dest: /etc/oci-control-server/health.json
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install health units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - control-health.service
+    - control-health.timer
+    - control-failure@.service
+  register: monitoring_units
+
+- name: Create failure hook directories
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ control_health_failure_units }}"
+
+- name: Install failure hooks
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item }}.d/control-health.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      OnFailure=control-failure@%n.service
+  loop: "{{ control_health_failure_units }}"
+  register: monitoring_hooks
+
+- name: Enable health timer without restarting production services
+  ansible.builtin.systemd_service:
+    name: control-health.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ monitoring_units.changed or monitoring_hooks.changed }}"

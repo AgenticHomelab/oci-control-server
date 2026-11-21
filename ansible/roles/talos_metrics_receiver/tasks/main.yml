@@ -1,0 +1,256 @@
+---
+- name: Require explicit deployment approval and existing Tailnet address
+  ansible.builtin.assert:
+    that:
+      - talos_metrics_receiver_deploy | bool
+      - tailscale_ipv4_address is defined
+      - talos_metrics_receiver_hostname is defined
+      - talos_metrics_receiver_tailnet_hostname is defined
+      - talos_metrics_receiver_hostname | default('') is match('^[a-z0-9][a-z0-9.-]*[.][a-z]{2,63}$')
+      - talos_metrics_receiver_tailnet_hostname | default('') is match('^[a-z0-9][a-z0-9.-]*[.][a-z]{2,63}$')
+      - tailscale_ipv4_address | default('') is match('^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$')
+    fail_msg: Supply the existing Tailnet IPv4 and explicit receiver deployment gate after approval.
+
+- name: Validate protected prerequisite metadata and native services
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      safe_dir() {
+        test ! -L "$1" && test -d "$1"
+        test "$(stat -c '%U' "$1")" = root
+        test $(( 8#$(stat -c '%a' "$1") & 8#022 )) -eq 0
+      }
+      for path in / /etc /etc/nginx /etc/nginx/conf.d /etc/nginx/sites-enabled /etc/oci-control-server \
+        /etc/oci-control-server/talos-metrics /etc/letsencrypt \
+        /etc/letsencrypt/live /etc/letsencrypt/archive \
+        /etc/letsencrypt/live/{{ talos_metrics_receiver_hostname }} /etc/letsencrypt/archive/{{ talos_metrics_receiver_hostname }}; do
+        safe_dir "$path"
+      done
+      # Workers must be able to traverse the credential ancestors.
+      test "$(stat -c '%U:%G:%a' /etc/oci-control-server)" = root:root:755
+      test "$(stat -c '%U:%G:%a' /etc/oci-control-server/talos-metrics)" = root:www-data:750
+      auth=/etc/oci-control-server/talos-metrics/htpasswd
+      test -f "$auth" && test ! -L "$auth" && test -s "$auth"
+      test "$(stat -c '%U:%G:%a:%h' "$auth")" = root:www-data:640:1
+      for name in fullchain privkey; do
+        live=/etc/letsencrypt/live/{{ talos_metrics_receiver_hostname }}/$name.pem
+        resolved=$(readlink -e "$live")
+        [[ "$resolved" =~ ^/etc/letsencrypt/archive/{{ talos_metrics_receiver_hostname | regex_escape }}/$name[0-9]+\.pem$ ]]
+        test -f "$resolved" && test ! -L "$resolved"
+        test "$(stat -c '%U:%G:%h' "$resolved")" = root:root:1
+        if [ "$name" = privkey ]; then
+          test "$(stat -c '%a' "$resolved")" = 600
+        else
+          test $(( 8#$(stat -c '%a' "$resolved") & 8#022 )) -eq 0
+        fi
+      done
+      # Compare public components entirely in-memory; never emit keys or fingerprints.
+      cmp -s <(openssl x509 -in /etc/letsencrypt/live/{{ talos_metrics_receiver_hostname }}/fullchain.pem -pubkey -noout) \
+        <(openssl pkey -in /etc/letsencrypt/live/{{ talos_metrics_receiver_hostname }}/privkey.pem -pubout)
+      openssl x509 -in /etc/letsencrypt/live/{{ talos_metrics_receiver_hostname }}/fullchain.pem -noout -ext subjectAltName \
+        | grep -E 'DNS:{{ talos_metrics_receiver_hostname | regex_escape }}(,|$)' >/dev/null
+      ip -4 addr show dev tailscale0 | grep -F 'inet {{ tailscale_ipv4_address }}/' >/dev/null
+      systemctl is-active --quiet nginx victoriametrics
+      # Verify effective runtime sockets, including absence of wildcard/IPv6 exposure.
+      sockets=$(ss -H -ltn)
+      test "$(printf '%s\n' "$sockets" | awk '$4 ~ /:8428$/ {print $4}')" = 127.0.0.1:8428
+      test "$(printf '%s\n' "$sockets" | awk '$4 ~ /:3000$/ {print $4}')" = 127.0.0.1:3000
+      printf '%s\n' "$sockets" | awk '{print $4}' | grep -Fx '{{ tailscale_ipv4_address }}:443' >/dev/null
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Validate trusted certificate hostname chain and expiry
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - verify
+      - -CAfile
+      - /etc/ssl/certs/ca-certificates.crt
+      - -untrusted
+      - /etc/letsencrypt/live/{{ talos_metrics_receiver_hostname }}/fullchain.pem
+      - -purpose
+      - sslserver
+      - -verify_hostname
+      - "{{ talos_metrics_receiver_hostname }}"
+      - /etc/letsencrypt/live/{{ talos_metrics_receiver_hostname }}/fullchain.pem
+  changed_when: false
+  check_mode: false
+
+- name: Inspect receiver destination metadata
+  ansible.builtin.stat:
+    path: /etc/nginx/sites-enabled/zz-talos-metrics-receiver.conf
+    follow: false
+    get_checksum: false
+    get_mime: false
+  register: receiver_destination
+
+- name: Reject unsafe existing receiver destination
+  ansible.builtin.assert:
+    that:
+      - >-
+        not receiver_destination.stat.exists or
+        (receiver_destination.stat.isreg | default(false) and
+        receiver_destination.stat.pw_name | default('') == 'root' and
+        receiver_destination.stat.gr_name | default('') == 'root' and
+        receiver_destination.stat.mode | default('') == '0644' and
+        receiver_destination.stat.nlink | default(0) == 1)
+
+- name: Read effective Nginx configuration without disclosing it
+  ansible.builtin.command: nginx -T
+  register: receiver_nginx
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Require standard include and reject conflicting receiver names or listeners
+  ansible.builtin.assert:
+    that:
+      - "'include /etc/nginx/sites-enabled/*;' in receiver_nginx.stdout"
+      - "'conflicting server name' not in receiver_nginx.stderr"
+      - receiver_nginx.stdout is search('(?m)^user\s+www-data;')
+      # Require the existing managed Hermes site, which sorts before zz even
+      # on initial deployment (when the receiver header does not yet exist).
+      - >-
+        receiver_nginx.stdout is search(
+        '(?ms)^# configuration file /etc/nginx/sites-enabled/hermes:\n' ~
+        '(?:(?!^# configuration file ).)*?^\s*listen\s+' ~
+        (tailscale_ipv4_address | regex_escape) ~ ':443\s+ssl;')
+      # On updates additionally verify effective ordering before our own file.
+      - >-
+        receiver_nginx.stdout.split('# configuration file /etc/nginx/sites-enabled/zz-talos-metrics-receiver.conf:')[0]
+        is search('listen\s+' ~ (tailscale_ipv4_address | regex_escape) ~ ':443\s+ssl')
+      - >-
+        receiver_nginx.stdout | regex_replace(
+        '(?ms)^# configuration file /etc/nginx/sites-enabled/zz-talos-metrics-receiver.conf:.*?(?=^# configuration file |\Z)', '')
+        is not search('(?m)^\s*server_name\s+[^;]*(' ~ (talos_metrics_receiver_hostname | regex_escape) ~ '|' ~ (talos_metrics_receiver_tailnet_hostname | regex_escape) ~ ')')
+      - receiver_nginx.stdout is not search('(?m)^\s*listen\s+(0\.0\.0\.0:443|443|\[::\]:443)\b')
+    fail_msg: Review conflicting names, wildcard HTTPS listeners or nonstandard Nginx includes before deployment.
+  no_log: true
+
+- name: Preserve only the prior receiver configuration for rollback
+  ansible.builtin.slurp:
+    src: /etc/nginx/sites-enabled/zz-talos-metrics-receiver.conf
+  register: receiver_previous
+  when: receiver_destination.stat.exists
+
+- name: Require existing metrics receiver for explicit logging operations
+  ansible.builtin.assert:
+    that:
+      - not (talos_logs_receiver_disable | bool) or (talos_logs_receiver_deploy | bool)
+      - not (talos_logs_receiver_deploy | bool) or receiver_destination.stat.exists
+    fail_msg: Logging operations require the existing receiver and the isolated logging play.
+
+- name: Preserve activated logging during normal receiver reconciliation
+  ansible.builtin.set_fact:
+    talos_logs_receiver_enabled: >-
+      {{ not (talos_logs_receiver_disable | bool) and
+         ((talos_logs_receiver_deploy | bool) or
+          ('location = /loki/api/v1/push {' in
+           (receiver_previous.content | default('') | b64decode))) }}
+
+- name: Validate separate logging credential metadata and loopback Loki readiness
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      dir=/etc/oci-control-server/talos-logs
+      test -d "$dir" && test ! -L "$dir"
+      test "$(stat -c '%U:%G:%a' "$dir")" = root:www-data:750
+      auth=$dir/htpasswd
+      test -f "$auth" && test ! -L "$auth" && test -s "$auth"
+      test "$(stat -c '%U:%G:%a:%h' "$auth")" = root:www-data:640:1
+      systemctl is-active --quiet loki
+      sockets=$(ss -H -ltn)
+      test "$(printf '%s\n' "$sockets" | awk '$4 ~ /:3100$/ {print $4}')" = 127.0.0.1:3100
+      test "$(printf '%s\n' "$sockets" | awk '$4 ~ /:9096$/ {print $4}')" = 127.0.0.1:9096
+      curl --fail --silent --show-error --noproxy '*' --max-time 5 http://127.0.0.1:3100/ready >/dev/null
+  changed_when: false
+  check_mode: false
+  no_log: true
+  when: talos_logs_receiver_enabled | bool
+
+- name: Install and verify only the receiver transaction
+  when: not ansible_check_mode
+  block:
+    - name: Render private receiver configuration atomically
+      ansible.builtin.template:
+        src: receiver.conf.j2
+        dest: /etc/nginx/sites-enabled/zz-talos-metrics-receiver.conf
+        owner: root
+        group: root
+        mode: "0644"
+      register: receiver_render
+
+    - name: Validate complete Nginx configuration and matching private key
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    # Immediate reload keeps validation and rollback inside this transaction.
+    - name: Reload existing Nginx only when receiver changed # noqa: no-handler
+      ansible.builtin.systemd_service:
+        name: nginx
+        state: reloaded
+      register: receiver_reload
+      when: receiver_render.changed
+
+    - name: Verify receiver SNI Host selection and authentication gate
+      ansible.builtin.command:
+        argv:
+          - curl
+          - --silent
+          - --show-error
+          - --noproxy
+          - '*'
+          - --max-time
+          - '10'
+          - --resolve
+          - '{{ talos_metrics_receiver_hostname }}:443:{{ tailscale_ipv4_address }}'
+          - --header
+          - 'Host: {{ talos_metrics_receiver_tailnet_hostname }}'
+          - --request
+          - POST
+          - --output
+          - /dev/null
+          - --write-out
+          - '%{http_code}'
+          - "https://{{ talos_metrics_receiver_hostname }}{{ item }}"
+      loop: "{{ ['/api/v1/write'] + (['/loki/api/v1/push'] if talos_logs_receiver_enabled | bool else []) }}"
+      register: receiver_probe
+      changed_when: false
+      failed_when: receiver_probe.stdout != '401'
+      retries: 3
+      delay: 1
+      until: receiver_probe is succeeded
+  rescue:
+    - name: Restore previous receiver configuration
+      ansible.builtin.copy:
+        content: "{{ receiver_previous.content | b64decode }}"
+        dest: /etc/nginx/sites-enabled/zz-talos-metrics-receiver.conf
+        owner: root
+        group: root
+        mode: "0644"
+      when: receiver_destination.stat.exists
+
+    - name: Remove newly introduced receiver after failed initial deployment
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/zz-talos-metrics-receiver.conf
+        state: absent
+      when: not receiver_destination.stat.exists
+
+    - name: Validate restored Nginx configuration
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Reload restored configuration if activation was attempted # noqa: no-handler
+      ansible.builtin.systemd_service:
+        name: nginx
+        state: reloaded
+      when:
+        - receiver_reload is defined
+        - not (receiver_reload.skipped | default(false))
+
+    - name: Report failed receiver transaction
+      ansible.builtin.fail:
+        msg: Receiver transaction failed; prior receiver configuration restored. Inspect Nginx before retrying.

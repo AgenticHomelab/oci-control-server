@@ -1,0 +1,8 @@
+---
+# Separate from the normal host and observability playbooks.
+- name: Configure native Grafana state backup
+  hosts: control
+  become: true
+  gather_facts: true
+  roles:
+    - grafana_backup

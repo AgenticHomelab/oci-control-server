@@ -1,0 +1,8 @@
+---
+# Explicit endpoint-only cutover/rollback. No packages, credentials, DNS or certificates.
+- name: Reconcile only the private Grafana endpoint
+  hosts: control
+  become: true
+  gather_facts: false
+  roles:
+    - grafana_tailnet

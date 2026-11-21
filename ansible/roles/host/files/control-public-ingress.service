@@ -1,0 +1,12 @@
+[Unit]
+Description=Configure control server public ingress firewall
+After=netfilter-persistent.service
+Wants=netfilter-persistent.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/control-public-ingress
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

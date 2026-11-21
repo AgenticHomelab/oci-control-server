@@ -1,0 +1,65 @@
+# Managed only by the isolated talos-metrics-receiver.yml / talos-logs-receiver.yml plays.
+server {
+    listen {{ tailscale_ipv4_address }}:443 ssl;
+    server_name {{ talos_metrics_receiver_hostname }} {{ talos_metrics_receiver_tailnet_hostname }};
+    ssl_certificate /etc/letsencrypt/live/{{ talos_metrics_receiver_hostname }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ talos_metrics_receiver_hostname }}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    client_max_body_size 16m;
+    client_header_timeout 15s;
+    client_body_timeout 30s;
+    send_timeout 30s;
+    keepalive_timeout 30s;
+    # Avoid logging usernames, arbitrary query strings or request payloads.
+    access_log off;
+{% if talos_logs_receiver_enabled | default(false) %}
+    # Auth/upstream errors can contain usernames or request targets. Suppress the
+    # shared vhost error sink as well, including errors before location selection.
+    error_log /dev/null;
+{% endif %}
+
+    if ($http_host !~* "^({{ talos_metrics_receiver_hostname | replace('.', '\.') }}|{{ talos_metrics_receiver_tailnet_hostname | replace('.', '\.') }})(:443)?$") {
+        return 421;
+    }
+    location = /api/v1/write {
+        # Location matching normalizes URIs. Require the exact original target too.
+        if ($request_uri != "/api/v1/write") { return 400; }
+        if ($request_method != POST) { return 405; }
+        auth_basic "Talos metrics ingestion";
+        auth_basic_user_file /etc/oci-control-server/talos-metrics/htpasswd;
+        proxy_pass http://127.0.0.1:8428/api/v1/write;
+        proxy_http_version 1.1;
+        proxy_set_header Host 127.0.0.1:8428;
+        proxy_set_header Authorization "";
+        proxy_set_header Connection "";
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+        proxy_next_upstream off;
+        proxy_redirect off;
+    }
+{% if talos_logs_receiver_enabled | default(false) %}
+    location = /loki/api/v1/push {
+        if ($request_uri != "/loki/api/v1/push") { return 400; }
+        if ($request_method != POST) { return 405; }
+        # $request_uri omits absolute-form authority; reject that target form too.
+        if ($request !~ "^POST /loki/api/v1/push HTTP/") { return 400; }
+        client_max_body_size 1m;
+        auth_basic "Talos logs ingestion";
+        auth_basic_user_file /etc/oci-control-server/talos-logs/htpasswd;
+        proxy_pass http://127.0.0.1:3100/loki/api/v1/push;
+        proxy_http_version 1.1;
+        proxy_set_header Host 127.0.0.1:3100;
+        proxy_set_header Authorization "";
+        proxy_set_header X-Scope-OrgID "";
+        proxy_set_header Connection "";
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+        proxy_next_upstream off;
+        proxy_redirect off;
+    }
+{% endif %}
+    location / { return 404; }
+}

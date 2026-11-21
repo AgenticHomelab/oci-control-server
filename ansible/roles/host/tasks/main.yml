@@ -1,0 +1,21 @@
+---
+- name: Configure host packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Clean up package upgrade leftovers
+  ansible.builtin.import_tasks: upgrade_cleanup.yml
+
+- name: Configure automatic security updates
+  ansible.builtin.import_tasks: security_updates.yml
+
+- name: Configure Ubuntu Pro
+  ansible.builtin.import_tasks: ubuntu_pro.yml
+
+- name: Configure Ubuntu sudo compatibility
+  ansible.builtin.import_tasks: sudo_compat.yml
+
+- name: Configure Docker
+  ansible.builtin.import_tasks: docker.yml
+
+- name: Configure public ingress firewall
+  ansible.builtin.import_tasks: firewall.yml

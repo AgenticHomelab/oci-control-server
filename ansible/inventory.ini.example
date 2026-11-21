@@ -1,0 +1,2 @@
+[control]
+control-01 ansible_host=control-01 ansible_user=ubuntu

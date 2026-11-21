@@ -1,0 +1,34 @@
+---
+- name: Configure OCI control server
+  hosts: control
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Configure host
+      ansible.builtin.import_role:
+        name: host
+
+    - name: Configure Tailscale
+      ansible.builtin.import_role:
+        name: tailscale
+
+    - name: Configure management toolchain
+      ansible.builtin.import_role:
+        name: toolchain
+
+    - name: Configure Hermes
+      ansible.builtin.import_role:
+        name: hermes
+
+    - name: Configure Omni
+      ansible.builtin.import_role:
+        name: omni
+
+    - name: Configure edge services
+      ansible.builtin.import_role:
+        name: edge
+
+    - name: Configure local production health monitoring
+      ansible.builtin.import_role:
+        name: monitoring

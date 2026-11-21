@@ -1,0 +1,21 @@
+---
+- name: Opt in only Omni to the verified Garage CA
+  hosts: control
+  become: true
+  gather_facts: true
+  serial: 1
+  pre_tasks:
+    - name: Require one scoped control-01 target and explicit CA action
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == 'control-01'
+          - ansible_play_hosts_all | length == 1
+          - omni_garage_ca_action in ['enable', 'rollback']
+          - omni_garage_ca_action != 'rollback' or omni_garage_ca_rollback_source is defined
+        fail_msg: >-
+          Limit this play to control-01 and explicitly select enable or rollback.
+  tasks:
+    - name: Configure and recreate only the Omni container
+      ansible.builtin.import_role:
+        name: omni
+        tasks_from: garage-ca

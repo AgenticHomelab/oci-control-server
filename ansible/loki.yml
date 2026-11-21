@@ -1,0 +1,22 @@
+---
+# Explicit stages; never included from routine host or observability plays.
+- name: Install local Loki only
+  hosts: control
+  become: true
+  gather_facts: true
+  environment:
+    NEEDRESTART_MODE: l
+  roles:
+    - role: loki
+      tags: [loki_install]
+
+- name: Integrate selected journals only after Loki readiness
+  hosts: control
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Configure logging integration
+      ansible.builtin.import_role:
+        name: observability
+        tasks_from: loki
+      tags: [never, loki_integrate]

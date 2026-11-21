@@ -1,0 +1,10 @@
+---
+# Separate opt-in playbook; do not change Omni/Hermes backup jobs.
+# Shared host backup target; OCI remains default until Garage acceptance.
+grafana_backup_target: "{{ omni_offsite_backup_target | default('oci') }}"
+grafana_backup_calendar: "*-*-* 04:15:00 UTC"
+grafana_backup_randomized_delay: 15m
+grafana_backup_bucket: "{{ omni_offsite_backup_bucket }}"
+grafana_backup_namespace: "{{ omni_offsite_backup_namespace }}"
+grafana_backup_region: "{{ omni_offsite_backup_region }}"
+grafana_backup_object_prefix: grafana

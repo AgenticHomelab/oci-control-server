@@ -1,0 +1,40 @@
+# Reusable example only. Do not apply without reviewing scope and identity.
+# Production Omni ACL resources and the reviewed service-account identifiers
+# remain in the private operations source.
+metadata:
+  namespace: default
+  type: AccessPolicies.omni.sidero.dev
+  id: access-policy
+spec:
+  rules:
+    - users:
+        - example-admin@serviceaccount.omni.sidero.dev
+      clusters:
+        - example-cluster
+      role: Operator
+      kubernetes:
+        impersonate:
+          groups:
+            - example-admin
+  tests:
+    - name: Authorized cluster
+      user:
+        name: example-admin@serviceaccount.omni.sidero.dev
+      cluster:
+        name: example-cluster
+      expected:
+        role: Operator
+        kubernetes:
+          impersonate:
+            groups:
+              - example-admin
+    - name: Other cluster is not granted
+      user:
+        name: example-admin@serviceaccount.omni.sidero.dev
+      cluster:
+        name: outside-authorization
+      expected:
+        role: None
+        kubernetes:
+          impersonate:
+            groups: []

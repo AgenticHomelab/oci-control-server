@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+expected_address=${1:?Expected Tailscale IPv4 address is required}
+attempts=0
+
+while [ "$attempts" -lt 60 ]; do
+  if ip -4 -o address show dev tailscale0 2>/dev/null \
+    | awk '{print $4}' \
+    | cut -d/ -f1 \
+    | grep -Fqx -- "$expected_address"; then
+    exit 0
+  fi
+
+  attempts=$((attempts + 1))
+  sleep 1
+done
+
+echo "Tailscale address $expected_address did not appear on tailscale0" >&2
+exit 1

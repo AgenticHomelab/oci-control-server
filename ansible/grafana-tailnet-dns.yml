@@ -1,0 +1,74 @@
+---
+# Operator-side API only; never invokes full edge reconciliation or host TLS tasks.
+- name: Reconcile only the control-owned Grafana DNS alias
+  hosts: control
+  gather_facts: false
+  vars:
+    cloudflare_dynamic_dns_records: []
+    cloudflare_static_dns_records:
+      - type: CNAME
+        name: "{{ grafana_tailnet_hostname }}"
+        content: "{{ grafana_tailnet_cname_target }}"
+        ttl: 300
+        proxied: false
+        comment: OCI control-owned private Grafana
+  tasks:
+    - name: Require separate DNS approval
+      ansible.builtin.assert:
+        that:
+          - grafana_tailnet_dns_deploy | default(false) | bool
+
+    - name: Reject overridden multi-record scope before DNS inspection
+      ansible.builtin.assert:
+        that:
+          - grafana_tailnet_hostname is defined
+          - grafana_tailnet_cname_target is defined
+          - cloudflare_dynamic_dns_records | length == 0
+          - cloudflare_static_dns_records | length == 1
+          - cloudflare_static_dns_records[0].type == 'CNAME'
+          - cloudflare_static_dns_records[0].name == grafana_tailnet_hostname
+          - cloudflare_static_dns_records[0].content == grafana_tailnet_cname_target
+          - not cloudflare_static_dns_records[0].proxied | bool
+          - cloudflare_static_dns_records[0].ttl == 300
+        fail_msg: >-
+          This play owns only the single Grafana DNS CNAME. Supply scoped
+          private input variables; a full host DNS --extra-vars mapping
+          must not override the one-record playbook scope.
+
+    - name: Inspect all record types at the reserved name
+      ansible.builtin.uri:
+        url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records?name={{ grafana_tailnet_hostname }}"
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+        return_content: true
+      delegate_to: localhost
+      register: grafana_dns_existing
+      check_mode: false
+      no_log: true
+
+    - name: Reject foreign or conflicting record ownership
+      ansible.builtin.assert:
+        that:
+          - grafana_dns_existing.json.success | bool
+          - grafana_dns_existing.json.result | length <= 1
+          - >-
+            grafana_dns_existing.json.result | length == 0 or
+            (grafana_dns_existing.json.result[0].type == 'CNAME' and
+            grafana_dns_existing.json.result[0].comment | default('') == 'OCI control-owned private Grafana')
+
+    - name: Preview exact DNS-only alias change
+      ansible.builtin.debug:
+        msg: "Only {{ grafana_tailnet_hostname }} CNAME to {{ grafana_tailnet_cname_target }}, DNS-only TTL 300, would be reconciled."
+      changed_when: >-
+        grafana_dns_existing.json.result | length == 0 or
+        grafana_dns_existing.json.result[0].content != grafana_tailnet_cname_target or
+        grafana_dns_existing.json.result[0].proxied or
+        grafana_dns_existing.json.result[0].ttl != 300
+      when: ansible_check_mode
+
+    # Existing native API reconciliation, but override both lists to exactly one name.
+    - name: Reconcile the one reserved DNS record
+      ansible.builtin.include_role:
+        name: edge
+        tasks_from: dns.yml
+      when: not ansible_check_mode

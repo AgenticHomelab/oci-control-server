@@ -1,0 +1,105 @@
+---
+- name: Install GitHub CLI repository signing key
+  ansible.builtin.get_url:
+    url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+    dest: /etc/apt/keyrings/githubcli-archive-keyring.gpg
+    mode: "0644"
+
+- name: Configure GitHub CLI repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/github-cli.list
+    mode: "0644"
+    content: |
+      deb [arch=arm64 signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main
+
+- name: Install GitHub CLI
+  ansible.builtin.apt:
+    name: gh
+    state: present
+    update_cache: true
+
+- name: Install kubectl
+  ansible.builtin.get_url:
+    url: "https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/arm64/kubectl"
+    checksum: "sha256:https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/arm64/kubectl.sha256"
+    dest: /usr/local/bin/kubectl
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Install talosctl
+  ansible.builtin.get_url:
+    url: "https://github.com/siderolabs/talos/releases/download/{{ talosctl_version }}/talosctl-linux-arm64"
+    checksum: "sha256:https://github.com/siderolabs/talos/releases/download/{{ talosctl_version }}/sha256sum.txt"
+    dest: /usr/local/bin/talosctl
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Create Flux installation directory
+  ansible.builtin.file:
+    path: "/opt/flux/{{ flux_version }}"
+    state: directory
+    mode: "0755"
+
+- name: Download Flux CLI
+  ansible.builtin.get_url:
+    url: "https://github.com/fluxcd/flux2/releases/download/v{{ flux_version }}/flux_{{ flux_version }}_linux_arm64.tar.gz"
+    checksum: "sha256:https://github.com/fluxcd/flux2/releases/download/v{{ flux_version }}/flux_{{ flux_version }}_checksums.txt"
+    dest: "/tmp/flux_{{ flux_version }}_linux_arm64.tar.gz"
+    mode: "0644"
+
+- name: Extract Flux CLI
+  ansible.builtin.unarchive:
+    src: "/tmp/flux_{{ flux_version }}_linux_arm64.tar.gz"
+    dest: "/opt/flux/{{ flux_version }}"
+    remote_src: true
+    creates: "/opt/flux/{{ flux_version }}/flux"
+
+- name: Set Flux CLI executable permissions
+  ansible.builtin.file:
+    path: "/opt/flux/{{ flux_version }}/flux"
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Link Flux CLI
+  ansible.builtin.file:
+    src: "/opt/flux/{{ flux_version }}/flux"
+    dest: /usr/local/bin/flux
+    state: link
+    force: true
+
+- name: Create Helm installation directory
+  ansible.builtin.file:
+    path: "/opt/helm/{{ helm_version }}"
+    state: directory
+    mode: "0755"
+
+- name: Download Helm
+  ansible.builtin.get_url:
+    url: "https://get.helm.sh/helm-v{{ helm_version }}-linux-arm64.tar.gz"
+    checksum: "sha256:https://get.helm.sh/helm-v{{ helm_version }}-linux-arm64.tar.gz.sha256sum"
+    dest: "/tmp/helm-v{{ helm_version }}-linux-arm64.tar.gz"
+    mode: "0644"
+
+- name: Extract Helm
+  ansible.builtin.unarchive:
+    src: "/tmp/helm-v{{ helm_version }}-linux-arm64.tar.gz"
+    dest: "/opt/helm/{{ helm_version }}"
+    remote_src: true
+    creates: "/opt/helm/{{ helm_version }}/linux-arm64/helm"
+
+- name: Set Helm CLI executable permissions
+  ansible.builtin.file:
+    path: "/opt/helm/{{ helm_version }}/linux-arm64/helm"
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Link Helm
+  ansible.builtin.file:
+    src: "/opt/helm/{{ helm_version }}/linux-arm64/helm"
+    dest: /usr/local/bin/helm
+    state: link
+    force: true

@@ -1,0 +1,66 @@
+---
+- name: Set up Omni Vault verification
+  tags: [omni_auth_vault_setup]
+  when: omni_auth_secret_source == 'oci_vault'
+  block:
+    - name: Require pinned Omni Vault metadata
+      ansible.builtin.assert:
+        that:
+          - omni_auth_vault_secret_ocid is match('^ocid1\.vaultsecret\.[A-Za-z0-9.-]+$')
+          - omni_auth_vault_region is match('^[a-z]+-[a-z]+-[0-9]+$')
+          - omni_auth_vault_version_number is integer
+          - omni_auth_vault_version_number > 0
+
+    - name: Install Omni Vault verification prerequisites
+      ansible.builtin.apt:
+        name: [python3-yaml, python3-venv]
+        state: present
+
+    - name: Ensure existing pinned OCI CLI for Omni retrieval
+      ansible.builtin.pip:
+        name: "oci-cli=={{ omni_offsite_backup_oci_cli_version }}"
+        virtualenv: /opt/oci-cli
+        virtualenv_command: /usr/bin/python3 -m venv
+
+    - name: Ensure Omni Vault metadata directory
+      ansible.builtin.file:
+        path: /etc/oci-control-server
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Write non-secret Omni Vault metadata
+      ansible.builtin.copy:
+        dest: /etc/oci-control-server/vault-omni-auth.json
+        content: >-
+          {{ {'secret_id': omni_auth_vault_secret_ocid,
+              'region': omni_auth_vault_region,
+              'version_number': omni_auth_vault_version_number,
+              'account_uuid': omni_account_uuid,
+              'user_email': omni_user_email,
+              'admin_email': omni_dex_admin_email,
+              'admin_username': omni_dex_admin_username,
+              'hostname': omni_hostname,
+              'bind_address': omni_auth_bind_address} | to_nice_json }}
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Install Omni Vault helper
+      ansible.builtin.copy:
+        src: oci-omni-auth-credentials
+        dest: /usr/local/sbin/oci-omni-auth-credentials
+        owner: root
+        group: root
+        mode: "0700"
+
+- name: Reconcile complete Omni Vault authentication set
+  tags: [omni_auth_credentials]
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/oci-omni-auth-credentials]
+  changed_when: false
+  no_log: true
+  when:
+    - omni_auth_secret_source == 'oci_vault'
+    - not ansible_check_mode

@@ -1,0 +1,53 @@
+---
+- name: Require explicit dashboard deployment
+  ansible.builtin.assert:
+    that:
+      - talos_dashboard_deploy | default(false) | bool
+    fail_msg: Invoke talos-dashboard.yml with talos_dashboard_deploy=true after review.
+
+- name: Inspect existing dashboard directory and provider
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+  loop:
+    - /var/lib/grafana/dashboards
+    - /etc/grafana/provisioning/dashboards/control-metrics.yml
+    - /var/lib/grafana/dashboards/talos-cluster-overview.json
+  register: talos_dashboard_paths
+
+- name: Require the existing protected file provider
+  ansible.builtin.assert:
+    that:
+      - talos_dashboard_paths.results[0].stat.isdir | default(false)
+      - not (talos_dashboard_paths.results[0].stat.islnk | default(true))
+      - talos_dashboard_paths.results[0].stat.pw_name | default('') == 'root'
+      - talos_dashboard_paths.results[0].stat.gr_name | default('') == 'grafana'
+      - talos_dashboard_paths.results[0].stat.mode | default('') == '0750'
+      - talos_dashboard_paths.results[1].stat.isreg | default(false)
+      - not (talos_dashboard_paths.results[1].stat.islnk | default(true))
+      - talos_dashboard_paths.results[1].stat.pw_name | default('') == 'root'
+      - talos_dashboard_paths.results[1].stat.gr_name | default('') == 'grafana'
+      - talos_dashboard_paths.results[1].stat.mode | default('') == '0640'
+      - not (talos_dashboard_paths.results[2].stat.islnk | default(false))
+      - not (talos_dashboard_paths.results[2].stat.exists | default(false)) or (talos_dashboard_paths.results[2].stat.isreg | default(false))
+
+- name: Read only the nonsecret dashboard provider
+  ansible.builtin.slurp:
+    src: /etc/grafana/provisioning/dashboards/control-metrics.yml
+  register: talos_dashboard_provider
+
+- name: Require unchanged native dashboard polling
+  ansible.builtin.assert:
+    that:
+      - (talos_dashboard_provider.content | b64decode | from_yaml) == (lookup('ansible.builtin.file', role_path ~ '/files/dashboards.yml') | from_yaml)
+    fail_msg: The existing dashboard provider differs; do not rewrite it in this operation.
+
+- name: Install only the declarative Talos overview dashboard
+  ansible.builtin.copy:
+    src: talos-cluster-overview.json
+    dest: /var/lib/grafana/dashboards/talos-cluster-overview.json
+    owner: root
+    group: grafana
+    mode: "0640"

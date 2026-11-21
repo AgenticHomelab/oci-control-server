@@ -1,0 +1,55 @@
+[Unit]
+Description=Back up Grafana SQLite online and verify encrypted OCI object
+Documentation=https://www.sqlite.org/backup.html
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+UMask=0077
+# Disable ordinary core files and exclude process memory from piped crash reports.
+LimitCORE=0
+CoredumpFilter=0x0
+TimeoutStartSec=20min
+RuntimeDirectory=grafana-offsite-backup
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=no
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/run/grafana-offsite-backup
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+# Require systemd's per-activation ID before making any backup or cloud call.
+# This guards against an empty expansion producing a fixed OCI object key.
+ExecStartPre=/usr/bin/test -n ${INVOCATION_ID}
+
+# SQLite online backup handles concurrent Grafana WAL writes.
+ExecStart=/usr/bin/sqlite3 -readonly /var/lib/grafana/grafana.db ".backup /run/grafana-offsite-backup/grafana.db"
+# Fail closed if SQLite integrity_check is not exactly "ok".
+ExecStart=/usr/bin/sqlite3 -bail /run/grafana-offsite-backup/grafana.db "CREATE TEMP TABLE backup_check(value TEXT NOT NULL CHECK(value='ok')); INSERT INTO backup_check SELECT integrity_check FROM pragma_integrity_check;"
+ExecStart=/usr/bin/age --recipients-file /etc/oci-control-server/backup-age-recipient --output /run/grafana-offsite-backup/grafana.db.age /run/grafana-offsite-backup/grafana.db
+
+# A fresh systemd INVOCATION_ID makes each object immutable and unique;
+# no timestamps, custom upload wrapper, or OBJECT_OVERWRITE privilege.
+# Must be proven in disposable systemd fixture before production apply.
+{% if grafana_backup_target | default('oci') == 'truenas' %}
+# Root-only config, verified private CA, existing bucket and readback comparison.
+ExecStart=/usr/bin/rclone --config /etc/oci-control-server/garage-backup-rclone.conf --ca-cert /etc/oci-control-server/garage-backup-ca.pem --cache-dir /run/grafana-offsite-backup/cache --s3-no-check-bucket copyto /run/grafana-offsite-backup/grafana.db.age truenas:{{ truenas_backup_bucket }}/grafana/${INVOCATION_ID}.age --immutable
+ExecStart=/usr/bin/rclone --config /etc/oci-control-server/garage-backup-rclone.conf --ca-cert /etc/oci-control-server/garage-backup-ca.pem --cache-dir /run/grafana-offsite-backup/cache --s3-no-check-bucket copyto truenas:{{ truenas_backup_bucket }}/grafana/${INVOCATION_ID}.age /run/grafana-offsite-backup/retrieved.age
+{% else %}
+ExecStart=/opt/oci-cli/bin/oci --auth instance_principal --region {{ grafana_backup_region }} os object put --namespace-name {{ grafana_backup_namespace }} --bucket-name {{ grafana_backup_bucket }} --name {{ grafana_backup_object_prefix }}/${INVOCATION_ID}.age --file /run/grafana-offsite-backup/grafana.db.age --no-multipart --no-overwrite
+ExecStart=/opt/oci-cli/bin/oci --auth instance_principal --region {{ grafana_backup_region }} os object get --namespace-name {{ grafana_backup_namespace }} --bucket-name {{ grafana_backup_bucket }} --name {{ grafana_backup_object_prefix }}/${INVOCATION_ID}.age --file /run/grafana-offsite-backup/retrieved.age
+{% endif %}
+ExecStart=/usr/bin/cmp --silent /run/grafana-offsite-backup/grafana.db.age /run/grafana-offsite-backup/retrieved.age
+
+# RuntimeDirectory automatically removes plaintext staging after execution.

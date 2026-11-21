@@ -1,0 +1,168 @@
+---
+- name: Validate TLS credential source
+  ansible.builtin.assert:
+    that:
+      - cloudflare_tls_secret_source in ['environment', 'oci_vault']
+
+- name: Require controller token for environment TLS credentials
+  ansible.builtin.assert:
+    that:
+      - cloudflare_api_token | length > 0
+    fail_msg: "CLOUDFLARE_API_TOKEN must be set for environment TLS credentials."
+  no_log: true
+  when: cloudflare_tls_secret_source == 'environment'
+
+- name: Install edge proxy packages
+  ansible.builtin.apt:
+    name:
+      - certbot
+      - nginx
+      - python3-certbot-dns-cloudflare
+    policy_rc_d: 101
+    state: present
+
+- name: Verify Certbot Cloudflare plugin
+  ansible.builtin.command:
+    cmd: certbot plugins
+  register: certbot_plugins
+  changed_when: false
+  failed_when: "'dns-cloudflare' not in certbot_plugins.stdout"
+  check_mode: false
+
+- name: Write Certbot Cloudflare credentials
+  ansible.builtin.template:
+    src: cloudflare.ini.j2
+    dest: /etc/letsencrypt/cloudflare.ini
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  when: cloudflare_tls_secret_source == 'environment'
+
+- name: Configure Vault TLS credentials
+  ansible.builtin.include_tasks:
+    file: vault.yml
+    apply:
+      tags:
+        - edge_tls
+  when: cloudflare_tls_secret_source == 'oci_vault'
+
+- name: Remove Vault renewal override when returning to environment credentials
+  ansible.builtin.file:
+    path: /etc/systemd/system/certbot.service.d/oci-vault.conf
+    state: absent
+  register: cloudflare_removed_vault_override
+  when: cloudflare_tls_secret_source == 'environment'
+
+- name: Reload Certbot service after Vault rollback
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when:
+    - cloudflare_removed_vault_override.changed | default(false)
+    - not ansible_check_mode
+
+- name: Install certificate consumer renewal deploy hook
+  ansible.builtin.template:
+    src: reload-certificate-consumers.j2
+    dest: /etc/letsencrypt/renewal-hooks/deploy/reload-certificate-consumers
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Check for Hermes certificate
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ hermes_hostname }}/fullchain.pem"
+  register: hermes_certificate_file
+
+- name: Inspect Hermes certificate SANs
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "/etc/letsencrypt/live/{{ hermes_hostname }}/fullchain.pem"
+      - -noout
+      - -ext
+      - subjectAltName
+  register: hermes_certificate_sans
+  changed_when: false
+  check_mode: false
+  when: hermes_certificate_file.stat.exists
+
+- name: Reconcile Hermes certificate SANs
+  ansible.builtin.command:
+    argv:
+      - "{{ '/usr/local/sbin/certbot-with-vault' if cloudflare_tls_secret_source == 'oci_vault' else 'certbot' }}"
+      - certonly
+      - --dns-cloudflare
+      - --dns-cloudflare-credentials
+      - /etc/letsencrypt/cloudflare.ini
+      - --non-interactive
+      - --agree-tos
+      - --register-unsafely-without-email
+      - --cert-name
+      - "{{ hermes_hostname }}"
+      - --domains
+      - "{{ hermes_certificate_domains | join(',') }}"
+      - --force-renewal
+  changed_when: true
+  when: >-
+    not hermes_certificate_file.stat.exists or
+    (hermes_certificate_sans.stdout | default('') |
+    regex_findall('DNS:([^,\\s]+)') | sort)
+    != (hermes_certificate_domains | sort)
+
+- name: Check for Omni certificate
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ omni_certificate_name }}/fullchain.pem"
+  register: omni_certificate_file
+
+- name: Inspect Omni certificate SANs
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "/etc/letsencrypt/live/{{ omni_certificate_name }}/fullchain.pem"
+      - -noout
+      - -ext
+      - subjectAltName
+  register: omni_certificate_sans
+  changed_when: false
+  check_mode: false
+  when: omni_certificate_file.stat.exists
+
+- name: Reconcile Omni certificate SANs
+  ansible.builtin.command:
+    argv:
+      - "{{ '/usr/local/sbin/certbot-with-vault' if cloudflare_tls_secret_source == 'oci_vault' else 'certbot' }}"
+      - certonly
+      - --dns-cloudflare
+      - --dns-cloudflare-credentials
+      - /etc/letsencrypt/cloudflare.ini
+      - --non-interactive
+      - --agree-tos
+      - --register-unsafely-without-email
+      - --cert-name
+      - "{{ omni_certificate_name }}"
+      - --domains
+      - "{{ omni_certificate_domains | join(',') }}"
+      - --force-renewal
+  changed_when: true
+  when: >-
+    not omni_certificate_file.stat.exists or
+    (omni_certificate_sans.stdout | default('') |
+    regex_findall('DNS:([^,\\s]+)') | sort)
+    != (omni_certificate_domains | sort)
+
+- name: Remove superseded nginx-only renewal deploy hook
+  ansible.builtin.file:
+    path: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+    state: absent
+
+- name: Enable Certbot renewal timer
+  ansible.builtin.systemd_service:
+    name: certbot.timer
+    enabled: true
+    state: started

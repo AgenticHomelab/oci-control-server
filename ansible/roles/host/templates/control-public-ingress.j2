@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IPTABLES=/usr/sbin/iptables
+CHAIN=control-public-ingress
+PUBLIC_INTERFACE="{{ ansible_facts["default_ipv4"]["interface"] }}"
+
+trim_unreachable_rules() {
+    local chain="$1"
+    local reject_line
+    local last_line
+
+    reject_line="$(
+        "${IPTABLES}" -w 5 -S "${chain}" |
+        awk -v chain="${chain}" '
+            $1 == "-A" && $2 == chain { line++ }
+            $0 == "-A " chain " -j REJECT --reject-with icmp-host-prohibited" {
+                print line
+                exit
+            }
+        '
+    )"
+
+    [ -n "${reject_line}" ] || return
+
+    while true; do
+        last_line="$(
+            "${IPTABLES}" -w 5 -L "${chain}" --line-numbers -n |
+            awk '$1 ~ /^[0-9]+$/ { line = $1 } END { print line }'
+        )"
+        [ -n "${last_line}" ] || break
+        [ "${last_line}" -le "${reject_line}" ] && break
+        "${IPTABLES}" -w 5 -D "${chain}" "${last_line}"
+    done
+}
+
+# Rules after an unconditional REJECT can never match. Old persisted rules
+# contained a duplicate baseline after the first reject; remove only that
+# provably unreachable tail without flushing Tailscale's live chains.
+trim_unreachable_rules INPUT
+trim_unreachable_rules FORWARD
+
+# Create the application-owned chain if necessary.
+if ! "${IPTABLES}" -w 5 -nL "${CHAIN}" >/dev/null 2>&1; then
+    "${IPTABLES}" -w 5 -N "${CHAIN}"
+fi
+
+# Reconcile the complete contents of the application-owned chain.
+"${IPTABLES}" -w 5 -F "${CHAIN}"
+
+"${IPTABLES}" -w 5 -A "${CHAIN}" \
+    -i "${PUBLIC_INTERFACE}" \
+    -p tcp \
+    --dport {{ control_public_https_port }} \
+    -m conntrack \
+    --ctstate NEW \
+    -j ACCEPT
+
+"${IPTABLES}" -w 5 -A "${CHAIN}" \
+    -i "${PUBLIC_INTERFACE}" \
+    -p udp \
+    --dport {{ control_public_siderolink_port }} \
+    -j ACCEPT
+
+"${IPTABLES}" -w 5 -A "${CHAIN}" -j RETURN
+
+# Remove any previous INPUT jumps to the managed chain.
+while true; do
+    line="$(
+        "${IPTABLES}" -w 5 -L INPUT --line-numbers -n |
+        awk -v chain="${CHAIN}" '$2 == chain { print $1; exit }'
+    )"
+
+    [ -n "${line}" ] || break
+    "${IPTABLES}" -w 5 -D INPUT "${line}"
+done
+
+# Insert the managed chain immediately before the first general REJECT rule.
+reject_line="$(
+    "${IPTABLES}" -w 5 -L INPUT --line-numbers -n |
+    awk '$2 == "REJECT" { print $1; exit }'
+)"
+
+if [ -n "${reject_line}" ]; then
+    "${IPTABLES}" -w 5 -I INPUT "${reject_line}" -j "${CHAIN}"
+else
+    "${IPTABLES}" -w 5 -A INPUT -j "${CHAIN}"
+fi

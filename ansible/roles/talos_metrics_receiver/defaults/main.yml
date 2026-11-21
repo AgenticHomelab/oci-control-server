@@ -1,0 +1,5 @@
+---
+talos_metrics_receiver_deploy: false
+# Opt-in through talos-logs-receiver.yml; installed routes survive metrics reconciliation.
+talos_logs_receiver_deploy: false
+talos_logs_receiver_disable: false

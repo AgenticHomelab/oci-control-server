@@ -1,0 +1,8 @@
+---
+# Explicit opt-in only; never imported by normal host reconciliation.
+- name: Configure private Talos metrics receiver
+  hosts: control
+  become: true
+  gather_facts: false
+  roles:
+    - talos_metrics_receiver

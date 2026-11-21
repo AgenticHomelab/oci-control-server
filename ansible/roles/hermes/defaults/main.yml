@@ -1,0 +1,29 @@
+---
+# Deliberate bootstrap/rollback default; production remains on environment
+# until the operator supplies real metadata and separately approves cutover.
+hermes_dashboard_secret_source: environment
+hermes_dashboard_vault_secret_ocid: ""
+hermes_dashboard_vault_region: eu-stockholm-1
+hermes_dashboard_vault_version_number: null
+# One-run override only after separate credential-rotation approval.
+hermes_dashboard_vault_allow_rotation: false
+
+# Environment means the existing Hermes-owned dotenv; no new environment writer.
+hermes_api_secret_source: environment
+hermes_api_vault_secret_ocid: ""
+hermes_api_vault_region: eu-stockholm-1
+hermes_api_vault_version_number: null
+
+# GitHub App integration is opt-in until OCI Vault PEM and IAM are approved.
+hermes_github_app_enabled: false
+
+# Separately approved Vault-to-local PEM delivery; independent of GitHub tokens.
+hermes_github_app_key_enabled: false
+hermes_github_app_vault_secret_ocid: ""
+hermes_github_app_vault_region: eu-stockholm-1
+hermes_github_app_vault_version_number: 1
+hermes_github_app_allow_key_rotation: false
+
+# Only consumed by the separately invoked operational-access play.
+# Disable and reapply that play to revoke the native administrative sudo grant.
+hermes_admin_enabled: true

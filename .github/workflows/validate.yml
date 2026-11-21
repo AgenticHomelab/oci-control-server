@@ -1,0 +1,57 @@
+name: Validate public OCI source
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
+        with:
+          tofu_version: 1.12.6
+          tofu_wrapper: false
+      - name: Install offline validation tools
+        run: |
+          python3 -m venv "$RUNNER_TEMP/public-venv"
+          "$RUNNER_TEMP/public-venv/bin/pip" install -r requirements-test.txt ansible-core==2.21.4
+      - name: Validate OpenTofu without production backend
+        env:
+          TF_IN_AUTOMATION: '1'
+          TF_INPUT: '0'
+        run: |
+          set -euo pipefail
+          tofu -chdir=terraform fmt -check -diff
+          tofu -chdir=terraform init -backend=false -input=false -lockfile=readonly
+          tofu -chdir=terraform validate
+          test ! -e terraform/terraform.tfstate
+      - name: Validate complete Ansible entrypoints offline
+        working-directory: ansible
+        run: |
+          set -euo pipefail
+          for play in grafana-backup.yml grafana-tailnet-dns.yml grafana-tailnet.yml loki.yml observability.yml omni-garage-ca.yml playbook.yml talos-metrics-receiver.yml talos-logs-receiver.yml; do
+            "$RUNNER_TEMP/public-venv/bin/ansible-playbook" -i localhost, "$play" --syntax-check
+          done
+      - name: Run selected synthetic receiver contracts
+        run: |
+          PATH="$RUNNER_TEMP/public-venv/bin:$PATH" "$RUNNER_TEMP/public-venv/bin/python" -m pytest -q tests/test_talos_metrics_receiver.py tests/test_public_hermes_github_app.py
+      - name: Assemble clean tracked-file scan tree
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/public-security-tree"
+          git ls-files -z | tar --null -T - -cf - | tar -xf - -C "$RUNNER_TEMP/public-security-tree"
+          test ! -e "$RUNNER_TEMP/public-security-tree/.git"
+      - name: Run independent scanners on public files only
+        run: bash publication/scan_public_export.sh "$RUNNER_TEMP/public-security-tree" "$RUNNER_TEMP/public-venv"

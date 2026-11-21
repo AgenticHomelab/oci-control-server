@@ -1,0 +1,18 @@
+# Ansible-managed boot-time baseline. Tailscale owns its runtime-generated
+# IPv6 chains and installs them when tailscaled starts.
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:control-siderolink-ingress - [0:0]
+-A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -p ipv6-icmp -j ACCEPT
+-A INPUT -i lo -j ACCEPT
+-A INPUT -i tailscale0 -j ACCEPT
+-A INPUT -j control-siderolink-ingress
+-A INPUT -j REJECT --reject-with icmp6-adm-prohibited
+-A FORWARD -j REJECT --reject-with icmp6-adm-prohibited
+-A control-siderolink-ingress -i siderolink -p tcp -m multiport --dports {{ siderolink_ipv6_tcp_ports | join(',') }} -j ACCEPT
+-A control-siderolink-ingress -i siderolink -p tcp --dport {{ siderolink_ipv6_tcp_port_range }} -j ACCEPT
+-A control-siderolink-ingress -j RETURN
+COMMIT

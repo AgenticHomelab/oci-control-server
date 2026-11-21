@@ -1,0 +1,11 @@
+---
+# Existing public inputs use consumer names (cloudflare_, kubectl_, etc.) rather
+# than role-directory names. Avoid API churn solely to satisfy a naming style.
+# The orchestration play intentionally supplies become: true to every role;
+# become_user in a role inherits that setting. Keep other lint checks enabled.
+skip_list:
+  - var-naming[no-role-prefix]
+  - partial-become[task]
+exclude_paths:
+  - local-artifacts/
+  - .venv/

@@ -1,0 +1,119 @@
+---
+- name: Install Tailscale address wait helper
+  ansible.builtin.copy:
+    src: wait-for-tailscale-address
+    dest: /usr/local/sbin/wait-for-tailscale-address
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart nginx safely
+
+- name: Ensure nginx systemd override directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/nginx.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure nginx startup ordering for Tailscale
+  ansible.builtin.template:
+    src: nginx-tailscale.conf.j2
+    dest: /etc/systemd/system/nginx.service.d/tailscale.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart nginx safely
+
+- name: Configure nginx WebSocket connection mapping
+  ansible.builtin.copy:
+    src: websocket-map.conf
+    dest: /etc/nginx/conf.d/websocket-map.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx safely
+
+- name: Configure Hermes nginx virtual host
+  ansible.builtin.template:
+    src: hermes.conf.j2
+    dest: /etc/nginx/sites-available/hermes
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx safely
+
+- name: Enable Hermes nginx virtual host
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/hermes
+    dest: /etc/nginx/sites-enabled/hermes
+    state: link
+  notify: Reload nginx safely
+
+- name: Disable nginx default virtual host
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload nginx safely
+
+- name: Configure Omni gRPC content-type mapping
+  ansible.builtin.copy:
+    src: omni-grpc-map.conf
+    dest: /etc/nginx/conf.d/omni-grpc-map.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx safely
+
+- name: Configure Omni nginx virtual hosts
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/nginx/sites-available/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: omni.conf.j2
+      dest: omni
+    - src: omni-api.conf.j2
+      dest: omni-api
+    - src: omni-kube.conf.j2
+      dest: omni-kube
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: Reload nginx safely
+
+- name: Enable Omni nginx virtual hosts
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ item }}"
+    dest: "/etc/nginx/sites-enabled/{{ item }}"
+    state: link
+  loop:
+    - omni
+    - omni-api
+    - omni-kube
+  when: omni_edge_enabled | bool
+  notify: Reload nginx safely
+
+- name: Keep Omni nginx virtual hosts disabled during staging
+  ansible.builtin.file:
+    path: "/etc/nginx/sites-enabled/{{ item }}"
+    state: absent
+  loop:
+    - omni
+    - omni-api
+    - omni-kube
+  when: not (omni_edge_enabled | bool)
+  notify: Reload nginx safely
+
+- name: Validate nginx configuration
+  ansible.builtin.command:
+    cmd: nginx -t
+  changed_when: false
+  check_mode: false
+
+- name: Enable and start nginx
+  ansible.builtin.systemd_service:
+    name: nginx
+    enabled: true
+    state: started

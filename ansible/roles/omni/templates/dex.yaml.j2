@@ -1,0 +1,24 @@
+issuer: https://{{ omni_hostname }}:5556
+
+storage:
+  type: memory
+
+web:
+  https: {{ omni_auth_bind_address | default(tailscale_ipv4_address) }}:5556
+  tlsCert: /etc/dex/tls/fullchain.pem
+  tlsKey: /etc/dex/tls/key.pem
+
+enablePasswordDB: true
+
+staticClients:
+  - name: Omni
+    id: omni
+    secretEnv: OMNI_OIDC_CLIENT_SECRET
+    redirectURIs:
+      - https://{{ omni_hostname }}/oidc/consume
+
+staticPasswords:
+  - email: "{{ omni_dex_admin_email }}"
+    username: "{{ omni_dex_admin_username }}"
+    preferredUsername: "{{ omni_dex_admin_username }}"
+    hash: "{{ omni_dex_admin_password_hash }}"

@@ -1,0 +1,12 @@
+[Unit]
+Description=Restrict local access to the Omni etcd API
+After=netfilter-persistent.service
+Wants=netfilter-persistent.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/control-omni-etcd
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

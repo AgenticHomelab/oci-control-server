@@ -1,0 +1,70 @@
+services:
+  dex:
+    image: ghcr.io/dexidp/dex:{{ omni_dex_version }}
+    container_name: dex
+    user: "0:0"
+    restart: unless-stopped
+    network_mode: host
+    logging:
+      driver: json-file
+      options:
+        max-file: "3"
+        max-size: 10m
+    env_file:
+      - /opt/omni/.env
+    command:
+      - dex
+      - serve
+      - /etc/dex/dex.yaml
+    volumes:
+      - /opt/omni/config/dex.yaml:/etc/dex/dex.yaml:ro
+      - /etc/letsencrypt/live/{{ omni_certificate_name }}/fullchain.pem:/etc/dex/tls/fullchain.pem:ro
+      - /etc/letsencrypt/live/{{ omni_certificate_name }}/privkey.pem:/etc/dex/tls/key.pem:ro
+
+  omni:
+    image: ghcr.io/siderolabs/omni:{{ omni_version }}
+    container_name: omni
+    restart: unless-stopped
+    network_mode: host
+    logging:
+      driver: json-file
+      options:
+        max-file: "3"
+        max-size: 10m
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - /opt/omni/secrets/omni.asc:/omni.asc:ro
+      - /opt/omni/secrets/omni-oidc.yaml:/run/secrets/omni-oidc.yaml:ro
+      - /opt/omni/data/etcd:/_out/etcd
+      - /opt/omni/data/sqlite:/_out/sqlite
+{% if omni_garage_ca_mount_enabled | default(false) %}
+      # Supply public system roots and add the private Garage root without insecure TLS.
+      - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
+      - /etc/oci-control-server/garage-backup-ca.pem:/etc/ssl/certs/garage-backup-ca.pem:ro
+{% endif %}
+    command:
+      - --config-path=/run/secrets/omni-oidc.yaml
+      - --name=omni
+      - --private-key-source=file:///omni.asc
+      - --bind-addr=127.0.0.1:8080
+      - --advertised-api-url=https://{{ omni_hostname }}/
+      - --machine-api-bind-addr=127.0.0.1:8090
+      - --machine-api-advertised-url=https://{{ omni_api_hostname }}:443
+      - --siderolink-wireguard-advertised-addr={{ omni_siderolink_wireguard_advertised_addr }}
+      - --event-sink-port=8091
+      - --metrics-bind-addr=127.0.0.1:2122
+      - --k8s-proxy-bind-addr=127.0.0.1:8100
+      - --advertised-kubernetes-proxy-url=https://{{ omni_kube_hostname }}/
+      - --account-id=${OMNI_ACCOUNT_UUID}
+      - --auth-auth0-enabled=false
+      - --auth-oidc-enabled=true
+      - --auth-oidc-provider-url=https://{{ omni_hostname }}:5556
+      - --auth-oidc-client-id=omni
+      - --auth-oidc-scopes=openid
+      - --auth-oidc-scopes=profile
+      - --auth-oidc-scopes=email
+      - --sqlite-storage-path=/_out/sqlite/omni.db
+      - --initial-users=${OMNI_USER_EMAIL}

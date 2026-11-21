@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily encrypted Grafana SQLite off-host backup
+
+[Timer]
+OnCalendar={{ grafana_backup_calendar }}
+Persistent=true
+RandomizedDelaySec={{ grafana_backup_randomized_delay }}
+AccuracySec=1m
+Unit=grafana-offsite-backup.service
+
+[Install]
+WantedBy=timers.target

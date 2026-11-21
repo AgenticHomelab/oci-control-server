@@ -1,0 +1,340 @@
+---
+- name: Require explicit endpoint approval and known Tailnet address
+  ansible.builtin.assert:
+    that:
+      - grafana_tailnet_deploy | bool
+      - grafana_tailnet_state in ['present', 'absent']
+      - >-
+        grafana_tailnet_state == 'absent' or
+        (grafana_tailnet_hostname | default('') is match('^[A-Za-z0-9.-]+$'))
+      - tailscale_ipv4_address | default('') is match('^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$')
+
+- name: Validate destination ancestors for cutover and rollback
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      for path in / /etc /etc/nginx /etc/nginx/sites-enabled /etc/grafana /etc/systemd /etc/systemd/system \
+        /etc/systemd/system/grafana-server.service.d; do
+        test -d "$path" && test ! -L "$path"
+        test "$(stat -c '%U' "$path")" = root
+        test $(( 8#$(stat -c '%a' "$path") & 8#022 )) -eq 0
+      done
+  changed_when: false
+  check_mode: false
+
+- name: Validate protected prerequisite metadata and native services
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      safe_dir() {
+        test ! -L "$1" && test -d "$1"
+        test "$(stat -c '%U' "$1")" = root
+        test $(( 8#$(stat -c '%a' "$1") & 8#022 )) -eq 0
+      }
+      for path in /etc/nginx/conf.d /etc/letsencrypt \
+        /etc/letsencrypt/live /etc/letsencrypt/archive \
+        /etc/letsencrypt/live/{{ grafana_tailnet_hostname }} /etc/letsencrypt/archive/{{ grafana_tailnet_hostname }}; do
+        safe_dir "$path"
+      done
+      for name in fullchain privkey; do
+        live=/etc/letsencrypt/live/{{ grafana_tailnet_hostname }}/$name.pem
+        resolved=$(readlink -e "$live")
+        [[ "$resolved" =~ ^/etc/letsencrypt/archive/{{ grafana_tailnet_hostname | regex_escape }}/$name[0-9]+\.pem$ ]]
+        test -f "$resolved" && test ! -L "$resolved"
+        test "$(stat -c '%U:%G:%h' "$resolved")" = root:root:1
+        if [ "$name" = privkey ]; then
+          test "$(stat -c '%a' "$resolved")" = 600
+        else
+          test $(( 8#$(stat -c '%a' "$resolved") & 8#022 )) -eq 0
+        fi
+      done
+      # Compare public components entirely in-memory; never emit keys or fingerprints.
+      cmp -s <(openssl x509 -in /etc/letsencrypt/live/{{ grafana_tailnet_hostname }}/fullchain.pem -pubkey -noout) \
+        <(openssl pkey -in /etc/letsencrypt/live/{{ grafana_tailnet_hostname }}/privkey.pem -pubout)
+      openssl x509 -in /etc/letsencrypt/live/{{ grafana_tailnet_hostname }}/fullchain.pem -noout -ext subjectAltName \
+        | grep -E 'DNS:{{ grafana_tailnet_hostname | regex_escape }}(,|$)' >/dev/null
+      openssl x509 -in /etc/letsencrypt/live/{{ grafana_tailnet_hostname }}/fullchain.pem -noout -checkend 86400 >/dev/null
+      ip -4 addr show dev tailscale0 | grep -F 'inet {{ tailscale_ipv4_address }}/' >/dev/null
+      systemctl is-active --quiet nginx grafana-server victoriametrics
+      # Verify effective runtime sockets, including absence of wildcard/IPv6 exposure.
+      sockets=$(ss -H -ltn)
+      test "$(printf '%s\n' "$sockets" | awk '$4 ~ /:8428$/ {print $4}')" = 127.0.0.1:8428
+      test "$(printf '%s\n' "$sockets" | awk '$4 ~ /:3000$/ {print $4}')" = 127.0.0.1:3000
+      printf '%s\n' "$sockets" | awk '{print $4}' | grep -Fx '{{ tailscale_ipv4_address }}:443' >/dev/null
+  changed_when: false
+  check_mode: false
+  no_log: true
+  when: grafana_tailnet_state == 'present'
+
+- name: Validate trusted certificate hostname chain and expiry
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - verify
+      - -CAfile
+      - /etc/ssl/certs/ca-certificates.crt
+      - -untrusted
+      - /etc/letsencrypt/live/{{ grafana_tailnet_hostname }}/fullchain.pem
+      - -purpose
+      - sslserver
+      - -verify_hostname
+      - "{{ grafana_tailnet_hostname }}"
+      - /etc/letsencrypt/live/{{ grafana_tailnet_hostname }}/fullchain.pem
+  changed_when: false
+  check_mode: false
+  when: grafana_tailnet_state == 'present'
+
+- name: Inspect only endpoint-owned files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+  loop:
+    - /etc/nginx/sites-enabled/zzz-grafana-tailnet.conf
+    - /etc/systemd/system/grafana-server.service.d/50-tailnet-url.conf
+  register: endpoint_paths
+
+- name: Reject unsafe endpoint destinations
+  ansible.builtin.assert:
+    that:
+      - >-
+        not item.stat.exists or (item.stat.isreg | default(false) and
+        not item.stat.islnk | default(false) and item.stat.uid == 0 and
+        item.stat.gid == 0 and item.stat.mode == '0644' and item.stat.nlink == 1)
+  loop: "{{ endpoint_paths.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Validate effective Nginx configuration privately
+  ansible.builtin.command: nginx -T
+  changed_when: false
+  check_mode: false
+  register: endpoint_nginx
+  no_log: true
+
+- name: Require existing routing and shared native WebSocket map without name conflicts
+  ansible.builtin.assert:
+    that:
+      - "'include /etc/nginx/sites-enabled/*;' in endpoint_nginx.stdout"
+      - "'map $http_upgrade $connection_upgrade' in endpoint_nginx.stdout"
+      - "'conflicting server name' not in endpoint_nginx.stderr"
+      - "'server_name ' ~ hermes_hostname ~ ';' in endpoint_nginx.stdout"
+      - endpoint_nginx.stdout is not search('(?m)^\s*listen\s+(0\.0\.0\.0:443|443|\[::\]:443)\b')
+      - >-
+        endpoint_nginx.stdout | regex_replace(
+        '(?ms)^# configuration file /etc/nginx/sites-enabled/zzz-grafana-tailnet.conf:.*?(?=^# configuration file |\Z)', '')
+        is not search('(?m)^\s*server_name\s+[^;]*' ~ (grafana_tailnet_hostname | regex_escape))
+  no_log: true
+
+- name: Require unchanged localhost INI and absence of competing URL overrides
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      test ! -L /etc/grafana/grafana.ini
+      test "$(stat -c '%U:%G:%a' /etc/grafana/grafana.ini)" = root:grafana:640
+      grep -Fx 'http_addr = 127.0.0.1' /etc/grafana/grafana.ini >/dev/null
+      grep -Fx 'domain = localhost' /etc/grafana/grafana.ini >/dev/null
+      grep -Fx 'root_url = http://localhost:3000/' /etc/grafana/grafana.ini >/dev/null
+      # Reject alternate EnvironmentFile or command-line GF_* overrides before cutover.
+      grep -Fx 'CONF_FILE=/etc/grafana/grafana.ini' /etc/default/grafana-server >/dev/null
+      if grep -Eq 'GF_' /etc/default/grafana-server; then exit 1; fi
+      unit=$(systemctl cat grafana-server)
+      test "$(printf '%s\n' "$unit" | grep -c '^EnvironmentFile=')" = 1
+      printf '%s\n' "$unit" | grep -Fx 'EnvironmentFile=/etc/default/grafana-server' >/dev/null
+      if printf '%s\n' "$unit" | awk '
+        /^# \// { skip = ($0 == "# /etc/systemd/system/grafana-server.service.d/50-tailnet-url.conf") }
+        !skip { print }
+      ' | grep -Eq 'GF_'; then exit 1; fi
+      if printf '%s\n' "$unit" | grep -Eq 'cfg:(default\.)?(auth|security|users|server)\.'; then exit 1; fi
+      exit 0
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Inspect existing native Grafana authentication configuration privately
+  ansible.builtin.slurp:
+    src: /etc/grafana/grafana.ini
+  register: endpoint_grafana_ini
+  no_log: true
+
+- name: Require existing native authentication before exposure
+  ansible.builtin.assert:
+    that:
+      - >-
+        endpoint_grafana_ini.content | b64decode is search(
+        '(?ms)^\[auth\.anonymous\]\n(?:(?!^\[).)*?^enabled\s*=\s*false\s*$')
+      - >-
+        endpoint_grafana_ini.content | b64decode is search(
+        '(?ms)^\[auth\.basic\]\n(?:(?!^\[).)*?^enabled\s*=\s*true\s*$')
+      - >-
+        endpoint_grafana_ini.content | b64decode is search(
+        '(?ms)^\[users\]\n(?:(?!^\[).)*?^allow_sign_up\s*=\s*false\s*$')
+      - >-
+        endpoint_grafana_ini.content | b64decode is not search(
+        '(?ms)^\[auth\.proxy\]\n(?:(?!^\[).)*?^enabled\s*=\s*true\s*$')
+  no_log: true
+
+- name: Capture only existing endpoint-owned configuration
+  ansible.builtin.slurp:
+    src: "{{ item.item }}"
+  loop: "{{ endpoint_paths.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists
+  register: endpoint_previous
+
+- name: Preview endpoint-only change in check mode
+  when: ansible_check_mode
+  block:
+    - name: Preview Nginx endpoint
+      ansible.builtin.template:
+        src: grafana.conf.j2
+        dest: /etc/nginx/sites-enabled/zzz-grafana-tailnet.conf
+        mode: "0644"
+      when: grafana_tailnet_state == 'present'
+    - name: Preview native Grafana URL override
+      ansible.builtin.template:
+        src: grafana-url.conf.j2
+        dest: /etc/systemd/system/grafana-server.service.d/50-tailnet-url.conf
+        mode: "0644"
+      when: grafana_tailnet_state == 'present'
+    - name: Preview scoped removal
+      ansible.builtin.file:
+        path: "{{ item.item }}"
+        state: absent
+      loop: "{{ endpoint_paths.results }}"
+      when: grafana_tailnet_state == 'absent'
+
+- name: Reconcile endpoint transaction without touching other consumers
+  when: not ansible_check_mode
+  block:
+    - name: Render only Grafana Nginx endpoint
+      ansible.builtin.template:
+        src: grafana.conf.j2
+        dest: /etc/nginx/sites-enabled/zzz-grafana-tailnet.conf
+        owner: root
+        group: root
+        mode: "0644"
+      when: grafana_tailnet_state == 'present'
+      register: endpoint_site
+
+    - name: Remove only Grafana Nginx endpoint on rollback
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/zzz-grafana-tailnet.conf
+        state: absent
+      when: grafana_tailnet_state == 'absent'
+      register: endpoint_remove_site
+
+    - name: Validate Nginx before touching Grafana
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Render only native Grafana URL override
+      ansible.builtin.template:
+        src: grafana-url.conf.j2
+        dest: /etc/systemd/system/grafana-server.service.d/50-tailnet-url.conf
+        owner: root
+        group: root
+        mode: "0644"
+      when: grafana_tailnet_state == 'present'
+      register: endpoint_url
+
+    - name: Remove only URL override on rollback
+      ansible.builtin.file:
+        path: /etc/systemd/system/grafana-server.service.d/50-tailnet-url.conf
+        state: absent
+      when: grafana_tailnet_state == 'absent'
+      register: endpoint_remove_url
+
+    - name: Restart only Grafana if canonical URL changed # noqa: no-handler
+      ansible.builtin.systemd_service:
+        name: grafana-server
+        daemon_reload: true
+        state: restarted
+      when: endpoint_url.changed or endpoint_remove_url.changed
+      register: endpoint_restart
+
+    - name: Require healthy existing Grafana before switching proxy
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/health
+        headers:
+          Host: "{{ grafana_tailnet_hostname if grafana_tailnet_state == 'present' else 'localhost' }}"
+        status_code: 200
+      register: endpoint_health
+      retries: 10
+      delay: 2
+      until: endpoint_health is succeeded
+
+    - name: Reload only Nginx when endpoint changed # noqa: no-handler
+      ansible.builtin.systemd_service:
+        name: nginx
+        state: reloaded
+      when: endpoint_site.changed or endpoint_remove_site.changed
+      register: endpoint_reload
+
+    - name: Verify trusted HTTPS and native authentication denial
+      ansible.builtin.command:
+        argv:
+          - curl
+          - --silent
+          - --show-error
+          - --noproxy
+          - '*'
+          - --max-time
+          - '10'
+          - --resolve
+          - '{{ grafana_tailnet_hostname }}:443:{{ tailscale_ipv4_address }}'
+          - --output
+          - /dev/null
+          - --write-out
+          - '%{http_code}'
+          - https://{{ grafana_tailnet_hostname }}/api/user
+      changed_when: false
+      register: endpoint_probe
+      failed_when: endpoint_probe.stdout != '401'
+      when: grafana_tailnet_state == 'present'
+  rescue:
+    - name: Remove only endpoint-owned files before restoring prior state
+      ansible.builtin.file:
+        path: "{{ item.item }}"
+        state: absent
+      loop: "{{ endpoint_paths.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Restore prior endpoint-owned files
+      ansible.builtin.copy:
+        content: "{{ item.content | b64decode }}"
+        dest: "{{ item.item.item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ endpoint_previous.results }}"
+      when: not item.skipped | default(false)
+      loop_control:
+        label: "{{ item.item.item }}"
+
+    - name: Validate restored Nginx
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Restore Grafana URL through native daemon reload and restart # noqa: no-handler
+      ansible.builtin.systemd_service:
+        name: grafana-server
+        daemon_reload: true
+        state: restarted
+      when: endpoint_restart is defined and not endpoint_restart.skipped | default(false)
+
+    - name: Restore running Nginx configuration if reload attempted # noqa: no-handler
+      ansible.builtin.systemd_service:
+        name: nginx
+        state: reloaded
+      when: endpoint_reload is defined and not endpoint_reload.skipped | default(false)
+
+    - name: Report failed cutover after scoped restoration
+      ansible.builtin.fail:
+        msg: Endpoint transaction failed; owned files restored. Verify Grafana health and Nginx before retry. No unrelated service recovery is authorized.

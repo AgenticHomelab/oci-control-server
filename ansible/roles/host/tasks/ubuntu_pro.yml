@@ -1,0 +1,81 @@
+---
+- name: Read Ubuntu Pro status
+  ansible.builtin.command:
+    cmd: pro status --format=json
+  register: ubuntu_pro_status
+  changed_when: false
+  failed_when: ubuntu_pro_status.rc != 0
+  check_mode: false
+
+- name: Require Ubuntu Pro token for first attachment
+  ansible.builtin.assert:
+    that:
+      - ubuntu_pro_token | length > 0
+    fail_msg: >-
+      UBUNTU_PRO_TOKEN must be set when attaching a new control server
+      to Ubuntu Pro.
+  when: not ((ubuntu_pro_status.stdout | from_json).attached | bool)
+  no_log: true
+
+- name: Attach Ubuntu Pro subscription
+  when: not ((ubuntu_pro_status.stdout | from_json).attached | bool)
+  no_log: true
+  block:
+    - name: Write temporary Ubuntu Pro attach configuration
+      ansible.builtin.copy:
+        dest: /run/oci-control-server-pro-attach.yaml
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          token: {{ ubuntu_pro_token }}
+      diff: false
+
+    - name: Attach Ubuntu Pro using temporary configuration
+      ansible.builtin.command:
+        argv:
+          - pro
+          - attach
+          - --attach-config
+          - /run/oci-control-server-pro-attach.yaml
+      changed_when: true
+  always:
+    - name: Remove temporary Ubuntu Pro attach configuration
+      ansible.builtin.file:
+        path: /run/oci-control-server-pro-attach.yaml
+        state: absent
+
+- name: Read Ubuntu Pro status after attachment
+  ansible.builtin.command:
+    cmd: pro status --format=json
+  register: ubuntu_pro_status_final
+  changed_when: false
+  check_mode: false
+
+- name: Enable Ubuntu Pro security services
+  ansible.builtin.command:
+    argv:
+      - pro
+      - enable
+      - "{{ item }}"
+  loop:
+    - esm-apps
+    - esm-infra
+    - livepatch
+  when:
+    - >-
+      ((ubuntu_pro_status_final.stdout | from_json).services
+      | selectattr('name', 'equalto', item)
+      | map(attribute='status')
+      | first
+      | default('disabled')) != 'enabled'
+    - item != 'livepatch' or ansible_facts["distribution_release"] == 'resolute'
+  changed_when: true
+
+- name: Verify Livepatch status on Ubuntu 26.04
+  ansible.builtin.command:
+    cmd: canonical-livepatch status
+  register: livepatch_status
+  changed_when: false
+  check_mode: false
+  when: ansible_facts["distribution_release"] == "resolute"

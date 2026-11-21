@@ -1,0 +1,20 @@
+---
+- name: Read default sudo provider
+  ansible.builtin.command:
+    cmd: readlink -f /usr/bin/sudo
+  register: sudo_provider
+  changed_when: false
+  check_mode: false
+  when: ansible_facts["distribution_release"] == "resolute"
+
+- name: Use sudo.ws on Ubuntu 26.04 for OCI agent compatibility
+  ansible.builtin.command:
+    argv:
+      - update-alternatives
+      - --set
+      - sudo
+      - /usr/bin/sudo.ws
+  when:
+    - ansible_facts["distribution_release"] == "resolute"
+    - sudo_provider.stdout | trim != "/usr/bin/sudo.ws"
+  changed_when: true

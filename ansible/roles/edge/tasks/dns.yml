@@ -1,0 +1,110 @@
+---
+- name: Require Cloudflare API token
+  tags:
+    - cloudflare_dns
+  ansible.builtin.assert:
+    that:
+      - cloudflare_api_token | length > 0
+    fail_msg: "CLOUDFLARE_API_TOKEN must be set."
+  no_log: true
+
+- name: Combine managed Cloudflare DNS records
+  tags:
+    - cloudflare_dns
+  ansible.builtin.set_fact:
+    cloudflare_dns_records: >-
+      {{
+        cloudflare_static_dns_records
+        + cloudflare_dynamic_dns_records
+      }}
+
+- name: Read Cloudflare DNS records
+  tags:
+    - cloudflare_dns
+  become: false
+  delegate_to: localhost
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records?type={{ item.type }}&name={{ item.name }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+    return_content: true
+    status_code: 200
+  loop: "{{ cloudflare_dns_records }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: cloudflare_dns_lookup
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Validate Cloudflare DNS records
+  tags:
+    - cloudflare_dns
+  ansible.builtin.assert:
+    that:
+      - item.json.success | bool
+      - item.json.result | length <= 1
+    fail_msg: "Unexpected Cloudflare DNS result for {{ item.item.name }}."
+    quiet: true
+  loop: "{{ cloudflare_dns_lookup.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Update Cloudflare DNS records
+  tags:
+    - cloudflare_dns
+  become: false
+  delegate_to: localhost
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records/{{ item.json.result[0].id }}"
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+    body_format: json
+    body:
+      type: "{{ item.item.type }}"
+      name: "{{ item.item.name }}"
+      content: "{{ item.item.content }}"
+      ttl: "{{ item.item.ttl }}"
+      proxied: "{{ item.item.proxied }}"
+      comment: "{{ item.item.comment }}"
+    status_code: 200
+  loop: "{{ cloudflare_dns_lookup.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.json.result | length == 1
+    - >
+      item.json.result[0].content != item.item.content or
+      item.json.result[0].ttl != item.item.ttl or
+      item.json.result[0].proxied != item.item.proxied or
+      (item.json.result[0].comment | default('')) != item.item.comment
+  changed_when: true
+  no_log: true
+
+- name: Create missing Cloudflare DNS records
+  tags:
+    - cloudflare_dns
+  become: false
+  delegate_to: localhost
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+    body_format: json
+    body:
+      type: "{{ item.item.type }}"
+      name: "{{ item.item.name }}"
+      content: "{{ item.item.content }}"
+      ttl: "{{ item.item.ttl }}"
+      proxied: "{{ item.item.proxied }}"
+      comment: "{{ item.item.comment }}"
+    status_code: 200
+  loop: "{{ cloudflare_dns_lookup.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.json.result | length == 0
+  changed_when: true
+  no_log: true

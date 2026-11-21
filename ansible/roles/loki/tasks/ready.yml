@@ -1,0 +1,12 @@
+---
+- name: Check local Loki readiness before forwarding
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3100/ready
+    timeout: 5
+    use_proxy: false
+  register: loki_ready
+  until: loki_ready.status | default(0) == 200
+  retries: 18
+  delay: 5
+  changed_when: false
+  when: not ansible_check_mode

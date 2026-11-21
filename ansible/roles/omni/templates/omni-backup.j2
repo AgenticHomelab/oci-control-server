@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+umask 077
+
+readonly BACKUP_DIRECTORY=/opt/omni/backups
+readonly ETCD_ENDPOINT=http://127.0.0.1:2379
+readonly SQLITE_DATABASE=/opt/omni/data/sqlite/omni.db
+readonly RETENTION_DAYS={{ omni_backup_retention_days }}
+
+exec 9>"${BACKUP_DIRECTORY}/.backup.lock"
+flock -n 9 || {
+    echo "Another Omni backup is already running" >&2
+    exit 1
+}
+
+# Interrupted runs can leave sensitive staging data behind. After taking the
+# exclusive lock, every staging directory and partial archive is necessarily
+# abandoned and can be removed immediately.
+find "${BACKUP_DIRECTORY}" -mindepth 1 -maxdepth 1 \
+    -type d -name '.staging.*' \
+    -exec rm -rf -- {} +
+find "${BACKUP_DIRECTORY}" -maxdepth 1 \
+    -type f -name 'omni-backup-*.tar.gz.partial' \
+    -delete
+
+timestamp="$(date --utc +%Y%m%dT%H%M%SZ)"
+staging_directory="$(mktemp --directory "${BACKUP_DIRECTORY}/.staging.XXXXXXXXXX")"
+archive="${BACKUP_DIRECTORY}/omni-backup-${timestamp}.tar.gz"
+temporary_archive="${archive}.partial"
+
+cleanup() {
+    rm -rf -- "${staging_directory}"
+    rm -f -- "${temporary_archive}"
+}
+trap cleanup EXIT
+
+install -d -m 0700 \
+    "${staging_directory}/config" \
+    "${staging_directory}/secrets"
+
+ETCDCTL_API=3 etcdctl \
+    --endpoints="${ETCD_ENDPOINT}" \
+    snapshot save "${staging_directory}/omni-etcd.snapshot"
+ETCDCTL_API=3 etcdctl \
+    snapshot status "${staging_directory}/omni-etcd.snapshot" \
+    --write-out=json >/dev/null
+
+sqlite3 "${SQLITE_DATABASE}" \
+    ".timeout 30000" \
+    ".backup '${staging_directory}/omni-sqlite.db'"
+
+if [[ "$(sqlite3 "${staging_directory}/omni-sqlite.db" 'PRAGMA integrity_check;')" != "ok" ]]; then
+    echo "SQLite integrity check failed" >&2
+    exit 1
+fi
+
+install -m 0600 /opt/omni/compose.yaml "${staging_directory}/config/compose.yaml"
+install -m 0600 /opt/omni/config/dex.yaml "${staging_directory}/config/dex.yaml"
+install -m 0600 /opt/omni/.env "${staging_directory}/config/runtime.env"
+install -m 0600 /opt/omni/secrets/omni.asc "${staging_directory}/secrets/omni.asc"
+install -m 0600 /opt/omni/secrets/omni-oidc.yaml "${staging_directory}/secrets/omni-oidc.yaml"
+
+# The archive deliberately normalizes sensitive payloads to mode 0600. Record
+# the live restore contract separately so a replacement host can reconstruct
+# the intended modes instead of inheriting the staging modes.
+{
+    printf 'architecture=%s\n' "$(uname --machine)"
+    etcdctl version | sed 's/^/tool=/'
+    sqlite3 --version | sed 's/^/tool=sqlite /'
+    stat --printf='path=%n mode=%a owner=%U group=%G\n' \
+        /opt/omni \
+        /opt/omni/config \
+        /opt/omni/data \
+        /opt/omni/data/etcd \
+        /opt/omni/data/sqlite \
+        /opt/omni/data/sqlite/omni.db \
+        /opt/omni/secrets \
+        /opt/omni/compose.yaml \
+        /opt/omni/.env \
+        /opt/omni/config/dex.yaml \
+        /opt/omni/secrets/omni.asc \
+        /opt/omni/secrets/omni-oidc.yaml
+} > "${staging_directory}/RESTORE_METADATA"
+
+(
+    cd "${staging_directory}"
+    sha256sum \
+        RESTORE_METADATA \
+        omni-etcd.snapshot \
+        omni-sqlite.db \
+        config/compose.yaml \
+        config/dex.yaml \
+        config/runtime.env \
+        secrets/omni.asc \
+        secrets/omni-oidc.yaml > SHA256SUMS
+)
+
+tar --create --gzip --file="${temporary_archive}" \
+    --directory="${staging_directory}" .
+chmod 0600 "${temporary_archive}"
+chown root:root "${temporary_archive}"
+mv -- "${temporary_archive}" "${archive}"
+
+find "${BACKUP_DIRECTORY}" -maxdepth 1 -type f \
+    -name 'omni-backup-*.tar.gz' \
+    -mtime "+$((RETENTION_DAYS - 1))" \
+    -delete
+
+echo "Created ${archive}"

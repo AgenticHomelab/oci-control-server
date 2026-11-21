@@ -1,0 +1,86 @@
+---
+- name: Require Vault metadata for host TLS retrieval
+  ansible.builtin.assert:
+    that:
+      - cloudflare_vault_secret_ocid is match('^ocid1\.vaultsecret\.[A-Za-z0-9.-]+$')
+      - cloudflare_vault_region is match('^[a-z]+-[a-z]+-[0-9]+$')
+      - cloudflare_vault_version_number is none or (cloudflare_vault_version_number is integer and cloudflare_vault_version_number > 0)
+    fail_msg: "Vault mode requires a secret OCID, region and optional positive version number."
+
+- name: Install OCI CLI prerequisites
+  ansible.builtin.apt:
+    name: python3-venv
+    state: present
+
+- name: Ensure pinned OCI CLI is available independently of backup enablement
+  ansible.builtin.pip:
+    name: "oci-cli=={{ omni_offsite_backup_oci_cli_version }}"
+    virtualenv: /opt/oci-cli
+    virtualenv_command: /usr/bin/python3 -m venv
+
+- name: Create Vault configuration directory
+  ansible.builtin.file:
+    path: /etc/oci-control-server
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write non-secret Vault retrieval configuration
+  ansible.builtin.copy:
+    dest: /etc/oci-control-server/vault-cloudflare.json
+    content: >-
+      {{ {'secret_id': cloudflare_vault_secret_ocid,
+          'region': cloudflare_vault_region,
+          'version_number': cloudflare_vault_version_number} | to_nice_json }}
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Install host Vault helper and Certbot wrapper
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/sbin/{{ item }}"
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - oci-cloudflare-credentials
+    - certbot-with-vault
+
+- name: Refresh credentials on control-01 with Instance Principal
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/oci-cloudflare-credentials
+  register: cloudflare_vault_refresh
+  changed_when: cloudflare_vault_refresh.stdout == 'changed'
+  no_log: true
+  diff: false
+  when: not ansible_check_mode
+
+- name: Create Certbot service override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/certbot.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Gate scheduled renewal on successful Vault refresh
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/certbot.service.d/oci-vault.conf
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/local/sbin/certbot-with-vault -q renew --no-random-sleep-on-renew
+    owner: root
+    group: root
+    mode: "0644"
+  register: cloudflare_vault_service_override
+
+- name: Reload Certbot service configuration
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when:
+    - cloudflare_vault_service_override.changed
+    - not ansible_check_mode

@@ -1,0 +1,13 @@
+{
+  "disk_percent": 85,
+  "backup_hours": 36,
+  "http": [
+    {"name": "Omni", "url": "https://{{ omni_hostname }}/", "resolve": "{{ omni_hostname }}:443:{{ tailscale_ipv4_address }}", "codes": ["200"]},
+    {"name": "Dex discovery", "url": "https://{{ omni_hostname }}:5556/.well-known/openid-configuration", "resolve": "{{ omni_hostname }}:5556:{{ tailscale_ipv4_address }}", "codes": ["200"]},
+    {"name": "Hermes", "url": "https://{{ hermes_hostname }}/", "resolve": "{{ hermes_hostname }}:443:{{ tailscale_ipv4_address }}", "codes": ["302"]},
+    {"name": "Kubernetes proxy", "url": "https://{{ omni_kube_hostname }}/", "resolve": "{{ omni_kube_hostname }}:443:{{ tailscale_ipv4_address }}", "codes": ["401"]},
+    {"name": "Machine API", "url": "https://{{ omni_api_hostname }}/", "resolve": "{{ omni_api_hostname }}:443:{{ omni_api_bind_address }}", "codes": ["415"]}
+  ],
+  "scheduled_services": ["omni-backup.service", "certbot.service"{% if omni_offsite_backup_enabled | bool %}, "omni-offsite-backup.service"{% endif %}],
+  "certificates": ["/etc/letsencrypt/live/{{ omni_certificate_name }}/cert.pem", "/etc/letsencrypt/live/{{ hermes_hostname }}/cert.pem"]
+}

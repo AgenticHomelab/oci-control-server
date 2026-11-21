@@ -1,0 +1,24 @@
+[Unit]
+Description=Encrypt and replicate validated Omni and Hermes backups off host
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/omni-offsite-backup
+TimeoutStartSec=45min
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/home/hermes/.hermes /var/lib/oci-control-server/offsite-staging /var/lib/oci-control-server-hermes-staging
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true

@@ -1,0 +1,10 @@
+[Unit]
+After=tailscaled.service network-online.target
+Wants=tailscaled.service network-online.target
+
+[Service]
+ExecStartPre=
+ExecStartPre=/usr/local/sbin/wait-for-tailscale-address {{ tailscale_ipv4_address }}
+ExecStartPre=/usr/sbin/nginx -t -q -g 'daemon on; master_process on;'
+Restart=on-failure
+RestartSec=5s

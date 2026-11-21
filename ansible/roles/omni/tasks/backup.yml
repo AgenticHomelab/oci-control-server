@@ -1,0 +1,234 @@
+---
+- name: Read TrueNAS credentials only for an explicitly selected Garage destination
+  ansible.builtin.import_tasks: truenas-vault.yml
+  when:
+    - omni_offsite_backup_enabled | bool
+    - omni_offsite_backup_target == 'truenas'
+
+- name: Install Omni backup tools
+  ansible.builtin.apt:
+    name:
+      - etcd-client
+      - sqlite3
+    state: present
+
+- name: Install Omni backup script
+  ansible.builtin.template:
+    src: omni-backup.j2
+    dest: /usr/local/sbin/omni-backup
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install Omni backup service
+  ansible.builtin.template:
+    src: omni-backup.service.j2
+    dest: /etc/systemd/system/omni-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: omni_backup_service
+
+- name: Require an off-host backup encryption recipient
+  ansible.builtin.assert:
+    that:
+      - omni_offsite_backup_age_recipient | length > 0
+      - >-
+        omni_offsite_backup_age_recipient is match(
+        '^(age1|ssh-(ed25519|rsa) )[A-Za-z0-9+/=]+'
+        )
+    fail_msg: >-
+      BACKUP_AGE_RECIPIENT must contain an age or SSH public recipient when
+      off-host backups are enabled. Keep the matching private identity off-host.
+  no_log: true
+  when: omni_offsite_backup_enabled | bool
+
+- name: Install off-host backup packages
+  ansible.builtin.apt:
+    name:
+      - age
+      - unzip
+      - python3-venv
+    state: present
+  when: omni_offsite_backup_enabled | bool
+
+- name: Install pinned OCI CLI
+  ansible.builtin.pip:
+    name: "oci-cli=={{ omni_offsite_backup_oci_cli_version }}"
+    virtualenv: /opt/oci-cli
+    virtualenv_command: /usr/bin/python3 -m venv
+  when: omni_offsite_backup_enabled | bool
+
+- name: Create off-host backup configuration directory
+  ansible.builtin.file:
+    path: /etc/oci-control-server
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: omni_offsite_backup_enabled | bool
+
+- name: Require a supported offsite backup target
+  ansible.builtin.assert:
+    that:
+      - omni_offsite_backup_target in ['oci', 'truenas']
+  when: omni_offsite_backup_enabled | bool
+
+- name: Validate TrueNAS backup opt-in
+  ansible.builtin.assert:
+    that:
+      - omni_offsite_backup_target in ['oci', 'truenas']
+      - truenas_backup_endpoint is match('^https://[A-Za-z0-9.-]+(:[0-9]{2,5})?/?$')
+      - truenas_backup_bucket is match('^[a-z0-9][a-z0-9.-]{2,62}$')
+      - truenas_backup_region == 'garage'
+      - truenas_backup_s3_access_key_id is match('^[A-Za-z0-9+/=_-]{12,256}$')
+      - truenas_backup_s3_secret_access_key is match('^[A-Za-z0-9+/=_-]{12,256}$')
+      - truenas_backup_ca_source | length > 0
+    fail_msg: Invalid private Garage S3 input
+  no_log: true
+  when:
+    - omni_offsite_backup_enabled | bool
+    - omni_offsite_backup_target == 'truenas'
+
+- name: Install rclone for TrueNAS backup transport
+  ansible.builtin.apt:
+    name: rclone
+    state: present
+  when:
+    - omni_offsite_backup_enabled | bool
+    - omni_offsite_backup_target == 'truenas'
+
+- name: Install private Garage S3 configuration
+  ansible.builtin.template:
+    src: garage-rclone.conf.j2
+    dest: /etc/oci-control-server/garage-backup-rclone.conf
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  when:
+    - omni_offsite_backup_enabled | bool
+    - omni_offsite_backup_target == 'truenas'
+
+- name: Install trusted Garage certificate authority
+  ansible.builtin.copy:
+    src: "{{ truenas_backup_ca_source }}"
+    dest: /etc/oci-control-server/garage-backup-ca.pem
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - omni_offsite_backup_enabled | bool
+    - omni_offsite_backup_target == 'truenas'
+- name: Create disk-backed offsite staging directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "0700"
+  loop:
+    - path: /var/lib/oci-control-server/offsite-staging
+      owner: root
+    - path: /home/hermes/.hermes/backups/offsite
+      owner: hermes
+    - path: /var/lib/oci-control-server-hermes-staging
+      owner: hermes
+  when: omni_offsite_backup_enabled | bool
+
+- name: Ensure Hermes quick-snapshot directory exists
+  ansible.builtin.file:
+    path: /home/hermes/.hermes/state-snapshots
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: "0700"
+  when: omni_offsite_backup_enabled | bool
+
+- name: Ensure Hermes backup lock exists
+  ansible.builtin.file:
+    path: /home/hermes/.hermes/.backup.lock
+    state: touch
+    owner: hermes
+    group: hermes
+    mode: "0600"
+    access_time: preserve
+    modification_time: preserve
+  when: omni_offsite_backup_enabled | bool
+
+- name: Install off-host backup encryption recipient
+  ansible.builtin.copy:
+    dest: /etc/oci-control-server/backup-age-recipient
+    content: "{{ omni_offsite_backup_age_recipient | trim }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  when: omni_offsite_backup_enabled | bool
+
+- name: Install off-host backup script
+  ansible.builtin.template:
+    src: omni-offsite-backup.j2
+    dest: /usr/local/sbin/omni-offsite-backup
+    owner: root
+    group: root
+    mode: "0700"
+  when: omni_offsite_backup_enabled | bool
+
+- name: Install off-host backup service
+  ansible.builtin.copy:
+    src: omni-offsite-backup.service
+    dest: /etc/systemd/system/omni-offsite-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: omni_offsite_backup_service
+  when: omni_offsite_backup_enabled | bool
+
+- name: Check for disabled off-host backup service
+  ansible.builtin.stat:
+    path: /etc/systemd/system/omni-offsite-backup.service
+  register: disabled_omni_offsite_backup_service
+  when: not (omni_offsite_backup_enabled | bool)
+
+- name: Stop disabled off-host backup service
+  ansible.builtin.systemd_service:
+    name: omni-offsite-backup.service
+    state: stopped
+  when:
+    - not (omni_offsite_backup_enabled | bool)
+    - disabled_omni_offsite_backup_service.stat.exists
+
+- name: Remove disabled off-host backup files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/omni-offsite-backup.service
+    - /usr/local/sbin/omni-offsite-backup
+    - /etc/oci-control-server/backup-age-recipient
+  register: removed_omni_offsite_backup_files
+  when: not (omni_offsite_backup_enabled | bool)
+
+- name: Install Omni backup timer
+  ansible.builtin.template:
+    src: omni-backup.timer.j2
+    dest: /etc/systemd/system/omni-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: omni_backup_timer
+
+- name: Enable Omni backup timer
+  ansible.builtin.systemd_service:
+    name: omni-backup.timer
+    enabled: true
+    daemon_reload: >-
+      {{
+        omni_backup_service.changed or
+        omni_backup_timer.changed or
+        (omni_offsite_backup_service.changed | default(false)) or
+        (removed_omni_offsite_backup_files.changed | default(false))
+      }}
+    state: started
+  when:
+    - not ansible_check_mode

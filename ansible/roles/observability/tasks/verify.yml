@@ -1,0 +1,47 @@
+---
+- name: Check loopback readiness endpoints
+  ansible.builtin.uri:
+    url: "{{ item }}"
+    return_content: true
+    timeout: 5
+    use_proxy: false
+  loop:
+    - http://127.0.0.1:8428/health
+    - http://127.0.0.1:3000/api/health
+    - http://127.0.0.1:12345/-/ready
+  register: observability_readiness
+  until: observability_readiness.status | default(0) == 200
+  retries: 12
+  delay: 5
+  changed_when: false
+
+- name: Require unauthenticated Grafana API rejection
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/api/search
+    status_code: 401
+    timeout: 5
+    use_proxy: false
+  changed_when: false
+
+- name: Verify fresh host metric families arrived through Alloy remote write
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:8428/api/v1/query?query={{ item | urlencode }}"
+    return_content: true
+    timeout: 5
+    use_proxy: false
+  loop:
+    - 'up{job="control/host",instance="{{ observability_instance }}"} == 1'
+    - 'time() - timestamp(up{job="control/host",instance="{{ observability_instance }}"}) < 90'
+    - 'node_cpu_seconds_total{instance="{{ observability_instance }}"}'
+    - 'node_memory_MemAvailable_bytes{instance="{{ observability_instance }}"}'
+    - 'node_filesystem_avail_bytes{instance="{{ observability_instance }}",mountpoint="/"}'
+    - 'node_disk_read_bytes_total{instance="{{ observability_instance }}"}'
+    - 'node_network_receive_bytes_total{instance="{{ observability_instance }}"}'
+    - 'node_systemd_unit_state{instance="{{ observability_instance }}",name="alloy.service",state="active"} == 1'
+  register: observability_query
+  until:
+    - observability_query.json.status | default('') == 'success'
+    - observability_query.json.data.result | default([]) | length > 0
+  retries: 18
+  delay: 5
+  changed_when: false

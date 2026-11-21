@@ -1,0 +1,94 @@
+---
+- name: Read existing Tailscale address for Omni authentication metadata
+  tags: [omni_auth_vault_setup]
+  ansible.builtin.command:
+    argv: [tailscale, ip, '-4']
+  register: omni_auth_tailscale_ip
+  changed_when: false
+  check_mode: false
+
+- name: Require existing Tailscale address for Omni authentication metadata
+  tags: [omni_auth_vault_setup]
+  ansible.builtin.assert:
+    that:
+      - omni_auth_tailscale_ip.stdout_lines | length == 1
+      - omni_auth_tailscale_ip.stdout | trim is match('^100\.[0-9]+\.[0-9]+\.[0-9]+$')
+
+- name: Record existing Tailscale address for Omni configuration
+  tags: [omni_auth_vault_setup]
+  ansible.builtin.set_fact:
+    omni_auth_bind_address: "{{ omni_auth_tailscale_ip.stdout | trim }}"
+
+- name: Require supported Omni authentication source
+  ansible.builtin.assert:
+    that:
+      - omni_auth_secret_source in ['environment', 'oci_vault']
+
+- name: Prepare and reconcile Omni Vault authentication
+  ansible.builtin.import_tasks: vault.yml
+
+- name: Install Omni Compose configuration
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: /opt/omni/compose.yaml
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: Require Omni runtime secrets
+  ansible.builtin.assert:
+    that:
+      - omni_account_uuid | length > 0
+      - omni_user_email | length > 0
+      - omni_oidc_client_secret | length > 0
+      - omni_dex_admin_email | length > 0
+      - omni_dex_admin_password_hash | length > 0
+    fail_msg: >-
+      Omni runtime identity and authentication values must be present in the
+      local environment before enabling the Omni runtime.
+  no_log: true
+  when:
+    - omni_runtime_enabled | bool
+    - omni_auth_secret_source == 'environment'
+
+- name: Install Omni runtime environment
+  ansible.builtin.template:
+    src: omni.env.j2
+    dest: /opt/omni/.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  register: omni_runtime_environment
+  when:
+    - omni_runtime_enabled | bool
+    - omni_auth_secret_source == 'environment'
+
+- name: Install Omni OIDC secret configuration
+  ansible.builtin.template:
+    src: omni-oidc.yaml.j2
+    dest: /opt/omni/secrets/omni-oidc.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  register: omni_oidc_configuration
+  when:
+    - omni_runtime_enabled | bool
+    - omni_auth_secret_source == 'environment'
+
+- name: Install Dex configuration
+  ansible.builtin.template:
+    src: dex.yaml.j2
+    dest: /opt/omni/config/dex.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  register: omni_dex_configuration
+  when:
+    - omni_runtime_enabled | bool
+    - omni_auth_secret_source == 'environment'

@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+umask 077
+
+readonly OCI=/opt/oci-cli/bin/oci
+readonly RCLONE=/usr/bin/rclone
+readonly BACKUP_TARGET={{ omni_offsite_backup_target | quote }}
+readonly TRUENAS_BUCKET={{ truenas_backup_bucket | default('') | quote }}
+readonly TRUENAS_CONFIG=/etc/oci-control-server/garage-backup-rclone.conf
+readonly TRUENAS_CA=/etc/oci-control-server/garage-backup-ca.pem
+readonly AGE=/usr/bin/age
+readonly BUCKET={{ omni_offsite_backup_bucket | quote }}
+readonly NAMESPACE={{ omni_offsite_backup_namespace | quote }}
+readonly REGION={{ omni_offsite_backup_region | quote }}
+readonly RECIPIENT_FILE=/etc/oci-control-server/backup-age-recipient
+readonly OMNI_BACKUP_DIRECTORY=/opt/omni/backups
+readonly HERMES_LOCAL_RETENTION={{ hermes_offsite_snapshot_local_retention }}
+readonly OFFSITE_STAGING_DIRECTORY=/var/lib/oci-control-server/offsite-staging
+readonly HERMES_LOCAL_DIRECTORY=/home/hermes/.hermes/backups/offsite
+readonly HERMES_STAGING_DIRECTORY=/var/lib/oci-control-server-hermes-staging
+
+if [[ "${BACKUP_TARGET}" != "oci" && "${BACKUP_TARGET}" != "truenas" ]]; then
+    echo "Unsupported offsite backup target" >&2
+    exit 1
+fi
+
+# Stage temporary files on disk.
+work_directory="$(mktemp --directory --tmpdir="${OFFSITE_STAGING_DIRECTORY}")"
+export TMPDIR="${work_directory}"
+hermes_stage=""
+
+cleanup() {
+    [[ -z "${hermes_stage}" ]] || rm -rf -- "${hermes_stage}"
+    rm -rf -- "${work_directory}"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+upload_and_verify() {
+    local source="$1"
+    local object_prefix="$2"
+    local retrieved="${work_directory}/retrieved.age"
+    local source_checksum
+    local retrieved_checksum
+    local object_name
+    local attempt=1
+    local delay=1
+
+    source_checksum="$(sha256sum "${source}" | awk '{print $1}')"
+    object_name="${object_prefix}-${source_checksum}.age"
+
+    while (( attempt <= 5 )); do
+        rm -f -- "${retrieved}"
+        if [[ "${BACKUP_TARGET}" == "truenas" ]]; then
+            # Immutable objects; no bucket creation, no TLS bypass, no credentials in argv.
+            "${RCLONE}" --config "${TRUENAS_CONFIG}" --ca-cert "${TRUENAS_CA}" \
+                --cache-dir "${work_directory}/rclone-cache" --s3-no-check-bucket copyto "${source}" \
+                "truenas:${TRUENAS_BUCKET}/${object_name}" --immutable >/dev/null || true
+            if "${RCLONE}" --config "${TRUENAS_CONFIG}" --ca-cert "${TRUENAS_CA}" \
+                --cache-dir "${work_directory}/rclone-cache" --s3-no-check-bucket copyto \
+                "truenas:${TRUENAS_BUCKET}/${object_name}" "${retrieved}" >/dev/null; then
+                retrieved_checksum="$(sha256sum "${retrieved}" | awk '{print $1}')"
+                if [[ "${source_checksum}" == "${retrieved_checksum}" ]]; then
+                    rm -f -- "${retrieved}"
+                    return 0
+                fi
+            fi
+        else
+            "${OCI}" --auth instance_principal --region "${REGION}" \
+                os object put \
+                --namespace-name "${NAMESPACE}" \
+                --bucket-name "${BUCKET}" \
+                --name "${object_name}" \
+                --file "${source}" \
+                --no-multipart \
+                --no-overwrite >/dev/null || true
+
+            if "${OCI}" --auth instance_principal --region "${REGION}" \
+                os object get \
+                --namespace-name "${NAMESPACE}" \
+                --bucket-name "${BUCKET}" \
+                --name "${object_name}" \
+                --file "${retrieved}" >/dev/null; then
+                retrieved_checksum="$(sha256sum "${retrieved}" | awk '{print $1}')"
+                if [[ "${source_checksum}" == "${retrieved_checksum}" ]]; then
+                    rm -f -- "${retrieved}"
+                    return 0
+                fi
+            fi
+        fi
+
+        if (( attempt < 5 )); then
+            sleep "${delay}"
+            delay=$((delay * 2))
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    echo "Failed to upload and verify ${object_name}" >&2
+    return 1
+}
+
+latest_omni_archive="$(
+    find "${OMNI_BACKUP_DIRECTORY}" -maxdepth 1 -type f \
+        -name 'omni-backup-*.tar.gz' -printf '%T@ %p\n' |
+        sort --numeric-sort --reverse |
+        awk 'NR == 1 {sub(/^[^ ]+ /, ""); print; exit}'
+)"
+
+if [[ -z "${latest_omni_archive}" ]]; then
+    echo "No completed Omni backup archive exists" >&2
+    exit 1
+fi
+
+omni_validation_directory="${work_directory}/omni-validation"
+install -d -m 0700 "${omni_validation_directory}"
+tar --extract --gzip --file="${latest_omni_archive}" \
+    --directory="${omni_validation_directory}"
+(
+    cd "${omni_validation_directory}"
+    sha256sum --check --quiet SHA256SUMS
+)
+ETCDCTL_API=3 etcdctl snapshot status \
+    "${omni_validation_directory}/omni-etcd.snapshot" \
+    --write-out=json >/dev/null
+if [[ "$(sqlite3 "${omni_validation_directory}/omni-sqlite.db" \
+    'PRAGMA integrity_check;')" != "ok" ]]; then
+    echo "Omni SQLite backup validation failed" >&2
+    exit 1
+fi
+rm -rf -- "${omni_validation_directory}"
+
+omni_ciphertext="${work_directory}/$(basename "${latest_omni_archive}").age"
+"${AGE}" --recipients-file "${RECIPIENT_FILE}" \
+    --output "${omni_ciphertext}" "${latest_omni_archive}"
+upload_and_verify "${omni_ciphertext}" \
+    "omni/$(date --utc +%Y/%m)/$(basename "${omni_ciphertext}" .age)"
+
+# Hermes creates the native ZIP, including online SQLite snapshots.
+hermes_stage="$(runuser --user hermes -- mktemp --directory --tmpdir="${HERMES_STAGING_DIRECTORY}")"
+hermes_archive="${hermes_stage}/hermes-backup-$(date --utc +%Y%m%dT%H%M%S)-$(basename "${hermes_stage}").zip"
+runuser --user hermes -- env HOME=/home/hermes HERMES_HOME=/home/hermes/.hermes \
+    TMPDIR="${hermes_stage}" HERMES_DISABLE_LAZY_INSTALLS=1 \
+    /home/hermes/.local/bin/hermes backup --output "${hermes_archive}" --keep 0
+[[ -s "${hermes_archive}" ]]
+unzip -tqq "${hermes_archive}" >/dev/null
+
+hermes_ciphertext="${work_directory}/$(basename "${hermes_archive}").age"
+"${AGE}" --recipients-file "${RECIPIENT_FILE}" \
+    --output "${hermes_ciphertext}" "${hermes_archive}"
+upload_and_verify "${hermes_ciphertext}" \
+    "hermes/$(date --utc +%Y/%m)/$(basename "${hermes_ciphertext}" .age)"
+
+# Publish local copies only after the selected destination readback succeeds.
+chmod 0600 "${hermes_archive}"
+mv -- "${hermes_archive}" "${HERMES_LOCAL_DIRECTORY}/$(basename "${hermes_archive}")"
+find "${HERMES_LOCAL_DIRECTORY}" -maxdepth 1 -type f -name 'hermes-backup-*.zip' -printf '%T@ %p\0' |
+    sort -z --numeric-sort --reverse |
+    tail -z -n "+$((HERMES_LOCAL_RETENTION + 1))" |
+    cut -z -d ' ' -f 2- | xargs -0 --no-run-if-empty rm --
+
+echo "Encrypted Omni and Hermes backups uploaded and checksum-verified"

@@ -1,0 +1,375 @@
+{
+  "uid": "control-host-overview",
+  "title": "Control host overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "tags": [
+    "control",
+    "host"
+  ],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "instance",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "control-victoriametrics"
+        },
+        "query": "label_values(up{job=\"control/host\"}, instance)",
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "CPU busy",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "control-victoriametrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{instance=\"$instance\",mode=\"idle\"}[$__rate_interval])))",
+          "legendFormat": "{{device}}{{mountpoint}}{{name}}{{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Memory used",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "control-victoriametrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{instance=\"$instance\"} / node_memory_MemTotal_bytes{instance=\"$instance\"})",
+          "legendFormat": "{{device}}{{mountpoint}}{{name}}{{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Filesystem available",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "control-victoriametrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_filesystem_avail_bytes{instance=\"$instance\"}",
+          "legendFormat": "{{device}}{{mountpoint}}{{name}}{{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Disk throughput",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "control-victoriametrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(node_disk_read_bytes_total{instance=\"$instance\"}[$__rate_interval])",
+          "legendFormat": "{{device}}{{mountpoint}}{{name}}{{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Network received",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "control-victoriametrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(node_network_receive_bytes_total{instance=\"$instance\",device!=\"lo\"}[$__rate_interval])",
+          "legendFormat": "{{device}}{{mountpoint}}{{name}}{{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Inactive or failed systemd units",
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "control-victoriametrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_systemd_unit_state{instance=\"$instance\",state=~\"failed|inactive\"} == 1",
+          "legendFormat": "{{device}}{{mountpoint}}{{name}}{{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Disk writes",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "control-victoriametrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(node_disk_written_bytes_total{instance=\"$instance\"}[$__rate_interval])",
+          "legendFormat": "{{device}}{{mountpoint}}{{name}}{{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Network sent",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "control-victoriametrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(node_network_transmit_bytes_total{instance=\"$instance\",device!=\"lo\"}[$__rate_interval])",
+          "legendFormat": "{{device}}{{mountpoint}}{{name}}{{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Root free space reserve (keep above 20 GiB)",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "control-victoriametrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_filesystem_avail_bytes{instance=\"$instance\",mountpoint=\"/\"}",
+          "legendFormat": "{{device}}{{mountpoint}}{{name}}{{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Host scrape healthy",
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "control-victoriametrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"control/host\",instance=\"$instance\"}",
+          "legendFormat": "{{device}}{{mountpoint}}{{name}}{{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    }
+  ]
+}

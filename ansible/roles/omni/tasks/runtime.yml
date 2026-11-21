@@ -1,0 +1,94 @@
+---
+- name: Require complete Vault authentication before Omni consumer synchronization
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/oci-omni-auth-credentials]
+  changed_when: false
+  no_log: true
+  when:
+    - omni_auth_secret_source == 'oci_vault'
+    - not ansible_check_mode
+
+- name: Inspect private Garage CA before Omni runtime activation
+  ansible.builtin.stat:
+    path: /etc/oci-control-server/garage-backup-ca.pem
+    follow: false
+  register: omni_garage_ca_stat
+  when:
+    - omni_runtime_enabled | bool
+    - omni_garage_ca_mount_enabled | default(false) | bool
+
+- name: Require an installed regular Garage CA file before Omni runtime activation
+  ansible.builtin.assert:
+    that:
+      - omni_garage_ca_stat.stat.isreg | default(false)
+      - not (omni_garage_ca_stat.stat.islnk | default(false))
+      - omni_garage_ca_stat.stat.mode == '0644'
+      - omni_garage_ca_stat.stat.uid == 0
+    fail_msg: >-
+      Public Garage CA must be installed as a regular root-owned file at
+      /etc/oci-control-server/garage-backup-ca.pem before opting Omni into
+      the read-only CA mount. Do not recreate Omni without a verified CA.
+  when:
+    - omni_runtime_enabled | bool
+    - omni_garage_ca_mount_enabled | default(false) | bool
+
+- name: Check for migrated Omni identity
+  ansible.builtin.stat:
+    path: /opt/omni/secrets/omni.asc
+  register: omni_identity
+
+- name: Require migrated Omni identity before runtime activation
+  ansible.builtin.assert:
+    that:
+      - omni_identity.stat.exists
+      - omni_identity.stat.isreg
+    fail_msg: >-
+      /opt/omni/secrets/omni.asc is missing. Restore the existing Omni identity
+      during the migration procedure before enabling the Omni runtime.
+  when: omni_runtime_enabled | bool
+
+- name: Start Omni Compose deployment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-directory
+      - /opt/omni
+      - --env-file
+      - /opt/omni/.env
+      - up
+      - -d
+      - --remove-orphans
+  register: omni_compose_up
+  changed_when: >-
+    'Created' in omni_compose_up.stderr or
+    'Started' in omni_compose_up.stderr or
+    'Recreated' in omni_compose_up.stderr
+  when:
+    - omni_runtime_enabled | bool
+    - not ansible_check_mode
+
+- name: Recreate OIDC consumers after secret configuration changes
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-directory
+      - /opt/omni
+      - --env-file
+      - /opt/omni/.env
+      - up
+      - -d
+      - --no-deps
+      - --force-recreate
+      - omni
+      - dex
+  changed_when: true
+  no_log: true
+  when:
+    - omni_runtime_enabled | bool
+    - not ansible_check_mode
+    - >-
+      (omni_runtime_environment.changed | default(false)) or
+      (omni_oidc_configuration.changed | default(false)) or
+      (omni_dex_configuration.changed | default(false))

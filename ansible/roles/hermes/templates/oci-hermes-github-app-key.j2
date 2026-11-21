@@ -1,0 +1,188 @@
+#!/usr/bin/python3
+"""Retrieve a pinned GitHub App signing PEM, preserving the last-good local key."""
+import base64
+import binascii
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import selectors
+import signal
+import stat
+import subprocess
+import sys
+import time
+
+METADATA = Path({{ hermes_github_app_metadata_file | to_json }})
+DESTINATION = Path({{ hermes_github_app_key_file | to_json }})
+CLI = "/opt/oci-cli/bin/oci"
+
+
+class RetrievalError(Exception):
+    pass
+
+
+def validate_config(config):
+    if not isinstance(config, dict) or set(config) != {
+        "secret_id", "region", "version_number", "allow_rotation"
+    }:
+        raise RetrievalError()
+    if (not isinstance(config["secret_id"], str)
+            or not re.fullmatch(r"ocid1\.vaultsecret\.[A-Za-z0-9.-]+", config["secret_id"])
+            or config["region"] != "eu-stockholm-1"
+            or type(config["version_number"]) is not int
+            or config["version_number"] < 1
+            or type(config["allow_rotation"]) is not bool):
+        raise RetrievalError()
+    return config
+
+
+def read_file(path, maximum=16384):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or info.st_gid != os.getegid()
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_nlink != 1 or info.st_size > maximum):
+            raise RetrievalError()
+        content = os.read(fd, maximum + 1)
+        if len(content) > maximum:
+            raise RetrievalError()
+        return content
+    finally:
+        os.close(fd)
+
+
+def validate_pem(pem):
+    if not isinstance(pem, bytes) or not 512 <= len(pem) <= 16384:
+        raise RetrievalError()
+    normalized = pem.rstrip(b"\n")
+    if normalized.startswith(b"-----BEGIN RSA PRIVATE KEY-----\n"):
+        start, end = b"-----BEGIN RSA PRIVATE KEY-----", b"-----END RSA PRIVATE KEY-----"
+    elif normalized.startswith(b"-----BEGIN PRIVATE KEY-----\n"):
+        start, end = b"-----BEGIN PRIVATE KEY-----", b"-----END PRIVATE KEY-----"
+    else:
+        raise RetrievalError()
+    if (not normalized.endswith(b"\n" + end)
+            or b"\x00" in normalized or b"\r" in normalized):
+        raise RetrievalError()
+    encoded = normalized[len(start) + 1: -len(end) - 1]
+    if not re.fullmatch(rb"[A-Za-z0-9+/\n=]+", encoded):
+        raise RetrievalError()
+    try:
+        result = subprocess.run(
+            ["/usr/bin/openssl", "pkey", "-noout", "-passin", "pass:"],
+            input=pem, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=8, check=False, env={"PATH": "/usr/bin:/bin"})
+    except (OSError, subprocess.TimeoutExpired):
+        raise RetrievalError() from None
+    if result.returncode:
+        raise RetrievalError()
+
+
+def run_cli(argv):
+    process = subprocess.Popen(
+        argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, start_new_session=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": "/root", "LANG": "C.UTF-8"})
+    try:
+        deadline = time.monotonic() + 45
+        output = bytearray()
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while True:
+                remain = deadline - time.monotonic()
+                if remain <= 0 or not selector.select(remain):
+                    raise RetrievalError()
+                chunk = os.read(process.stdout.fileno(), 8192)
+                if not chunk:
+                    break
+                output.extend(chunk)
+                if len(output) > 65536:
+                    raise RetrievalError()
+        if process.wait(timeout=max(0.01, deadline - time.monotonic())):
+            raise RetrievalError()
+        return bytes(output)
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+
+
+def fetch(config):
+    argv = [CLI, "--auth", "instance_principal", "--region", config["region"],
+            "--config-file", "/dev/null", "--cli-rc-file", "/dev/null",
+            "--no-retry", "--connection-timeout", "5", "--read-timeout", "10",
+            "--output", "json", "secrets", "secret-bundle", "get",
+            "--secret-id", config["secret_id"],
+            "--version-number", str(config["version_number"])]
+    try:
+        response = json.loads(run_cli(argv))["data"]
+        if (response["secret-id"] != config["secret_id"]
+                or type(response["version-number"]) is not int
+                or response["version-number"] != config["version_number"]
+                or response["secret-bundle-content"]["content-type"] != "BASE64"):
+            raise RetrievalError()
+        pem = base64.b64decode(
+            response["secret-bundle-content"]["content"], validate=True)
+        validate_pem(pem)
+        return pem
+    except (TypeError, KeyError, ValueError, binascii.Error):
+        raise RetrievalError() from None
+
+
+def install(pem, config):
+    validate_pem(pem)
+    parent = DESTINATION.parent
+    info = parent.lstat()
+    if (not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or info.st_gid != os.getegid()
+            or stat.S_IMODE(info.st_mode) & 0o022):
+        raise RetrievalError()
+    try:
+        current = read_file(DESTINATION)
+    except FileNotFoundError:
+        current = None
+    if current == pem:
+        return "unchanged"
+    if current is not None and not config["allow_rotation"]:
+        raise RetrievalError()
+    temporary = parent / (".hermes-github-key-" + secrets.token_hex(16))
+    fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as file:
+            os.fchmod(file.fileno(), 0o600)
+            file.write(pem)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, DESTINATION)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+    return "changed"
+
+
+def main():
+    try:
+        if os.geteuid() != 0 or sys.argv[1:]:
+            raise RetrievalError()
+        os.umask(0o077)
+        config = validate_config(json.loads(read_file(METADATA)))
+        print(install(fetch(config), config))
+        return 0
+    except BaseException:
+        print("GitHub App signing key reconciliation failed; old key preserved.",
+              file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,76 @@
+---
+- name: Require supported Hermes API credential source
+  tags: [hermes_api_credentials]
+  ansible.builtin.assert:
+    that:
+      - hermes_api_secret_source in ['environment', 'oci_vault']
+
+- name: Prepare Hermes API Vault retrieval
+  tags: [hermes_api_vault_setup, hermes_api_credentials]
+  when: hermes_api_secret_source == 'oci_vault'
+  block:
+    - name: Require pinned Hermes API Vault metadata
+      ansible.builtin.assert:
+        that:
+          - hermes_api_vault_secret_ocid is match('^ocid1\.vaultsecret\.[A-Za-z0-9.-]+$')
+          - hermes_api_vault_region is match('^[a-z]+-[a-z]+-[0-9]+$')
+          - hermes_api_vault_version_number is integer
+          - hermes_api_vault_version_number > 0
+
+    - name: Install Hermes API dotenv parser prerequisite
+      ansible.builtin.apt:
+        name: [python3-dotenv, python3-venv]
+        state: present
+
+    - name: Ensure existing pinned OCI CLI for Hermes API retrieval
+      ansible.builtin.pip:
+        name: "oci-cli=={{ omni_offsite_backup_oci_cli_version }}"
+        virtualenv: /opt/oci-cli
+        virtualenv_command: /usr/bin/python3 -m venv
+
+    - name: Ensure Hermes API Vault metadata directory
+      ansible.builtin.file:
+        path: /etc/oci-control-server
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Write non-secret Hermes API Vault metadata
+      ansible.builtin.copy:
+        dest: /etc/oci-control-server/vault-hermes-api.json
+        content: >-
+          {{ {'secret_id': hermes_api_vault_secret_ocid,
+              'region': hermes_api_vault_region,
+              'version_number': hermes_api_vault_version_number} | to_nice_json }}
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Install Hermes API Vault verifier
+      ansible.builtin.copy:
+        src: oci-hermes-api-credentials
+        dest: /usr/local/sbin/oci-hermes-api-credentials
+        owner: root
+        group: root
+        mode: "0700"
+
+- name: Reconcile retained Hermes API credential against Vault
+  tags: [hermes_api_credentials]
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/oci-hermes-api-credentials]
+  changed_when: false
+  no_log: true
+  when:
+    - hermes_api_secret_source == 'oci_vault'
+    - not ansible_check_mode
+
+- name: Verify Hermes API Vault equivalence without cutover
+  tags: [never, hermes_api_vault_verify]
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/oci-hermes-api-credentials, --verify-only]
+  changed_when: false
+  no_log: true
+  when:
+    - hermes_api_secret_source == 'oci_vault'
+    - not ansible_check_mode

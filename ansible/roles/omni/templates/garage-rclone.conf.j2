@@ -1,0 +1,10 @@
+[truenas]
+type = s3
+provider = Other
+env_auth = false
+access_key_id = {{ truenas_backup_s3_access_key_id }}
+secret_access_key = {{ truenas_backup_s3_secret_access_key }}
+endpoint = {{ truenas_backup_endpoint }}
+region = {{ truenas_backup_region }}
+force_path_style = true
+no_check_bucket = true

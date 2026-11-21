@@ -1,0 +1,4 @@
+---
+loki_version: "3.7.8"
+loki_archive_sha256: "a874c10ffefe4d66c914b8aac8897159451d3026469598341aa03c76084697de"
+loki_min_free_bytes: 21474836480

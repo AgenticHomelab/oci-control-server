@@ -1,0 +1,8 @@
+---
+# Isolated role use defaults to environment for bootstrap and emergency rollback.
+# Production group_vars/control.yml explicitly selects oci_vault.
+cloudflare_tls_secret_source: environment
+cloudflare_vault_secret_ocid: ""
+cloudflare_vault_region: eu-stockholm-1
+# null selects CURRENT; pin a positive version number for controlled rollback.
+cloudflare_vault_version_number: null

@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Read-only control-01 probes; publish only service metadata, never response bodies."""
+import datetime
+import json
+import os
+from pathlib import Path
+import pwd
+import subprocess
+import sys
+import time
+
+CONFIG = Path('/etc/oci-control-server/health.json')
+STATUS = Path('/var/lib/control-health/status.json')
+NOTIFIER = Path('/etc/oci-control-server/notify-health')
+NOTIFICATION_STATUS = Path('/var/lib/control-health/notified.json')
+
+
+def command(args, timeout=15, env=None):
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=env)
+    except (OSError, subprocess.TimeoutExpired):
+        return subprocess.CompletedProcess(args, 1, '', '')
+
+
+def recent_success(unit, hours):
+    result = command(['journalctl', '-u', unit, '--since', f'-{hours} hours',
+                      '-o', 'json', '--no-pager'], timeout=30)
+    if result.returncode:
+        return False
+    for line in reversed(result.stdout.splitlines()):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        # systemd emits these IDs regardless of the application log format.
+        if entry.get('UNIT') == unit:
+            message_id = entry.get('MESSAGE_ID')
+            if message_id == 'be02cf6855d2428ba40df7e9d022f03d':  # UNIT_FAILED
+                return False
+            if message_id == '7ad2d189f7e94e70a38c781354912448':  # UNIT_SUCCESS
+                return True
+    return False
+
+
+def collect(config):
+    failures = []
+
+    def require(ok, description):
+        if not ok:
+            failures.append(description)
+
+    for unit in ('nginx.service', 'docker.service', 'tailscaled.service',
+                 'omni-backup.timer', 'certbot.timer'):
+        require(command(['systemctl', 'is-active', '--quiet', unit]).returncode == 0,
+                f'{unit}: inactive; inspect systemctl status and journalctl -u {unit}')
+    for timer in ('omni-backup.timer', 'certbot.timer'):
+        require(command(['systemctl', 'is-enabled', '--quiet', timer]).returncode == 0,
+                f'{timer}: disabled; inspect timer configuration')
+
+    failed = command(['systemctl', '--failed', '--no-legend', '--plain', '--no-pager'])
+    require(failed.returncode == 0, 'systemd: cannot inspect failed units')
+    units = [line.split()[0] for line in failed.stdout.splitlines() if line.split()]
+    units = [unit for unit in units if unit != 'control-health.service']
+    require(not units, 'systemd: failed units ' + ', '.join(units))
+
+    try:
+        uid = pwd.getpwnam('hermes').pw_uid
+        user = ['runuser', '-u', 'hermes', '--', 'env', f'XDG_RUNTIME_DIR=/run/user/{uid}',
+                'systemctl', '--user']
+        for unit in ('hermes-gateway.service', 'hermes-dashboard.service'):
+            require(command(user + ['is-active', '--quiet', unit]).returncode == 0,
+                    f'{unit}: inactive; inspect Hermes user journal')
+        result = command(user + ['--failed', '--no-legend', '--plain', '--no-pager'])
+        require(result.returncode == 0 and not result.stdout.strip(),
+                'Hermes: failed user units or user manager unavailable')
+    except KeyError:
+        failures.append('Hermes: service user missing')
+
+    tailscale = command(['tailscale', 'status', '--json'])
+    try:
+        state = json.loads(tailscale.stdout)
+        online = tailscale.returncode == 0 and state['BackendState'] == 'Running' and state['Self']['Online']
+    except (ValueError, KeyError, TypeError):
+        online = False
+    require(online, 'Tailscale: disconnected; inspect tailscaled and console access')
+
+    for probe in config['http']:
+        result = command(['curl', '--silent', '--show-error', '--max-time', '10',
+                          '--resolve', probe['resolve'], '--output', '/dev/null',
+                          '--write-out', '%{http_code}', probe['url']])
+        require(result.returncode == 0 and result.stdout in probe['codes'],
+                f"{probe['name']}: unexpected HTTP/TLS response; inspect service and nginx logs")
+
+    for mount in ('/', '/boot', '/boot/efi'):
+        try:
+            stats = os.statvfs(mount)
+            block_used = 100 * (1 - stats.f_bavail / stats.f_blocks)
+            inode_used = 100 * (1 - stats.f_favail / stats.f_files) if stats.f_files else 0
+            require(max(block_used, inode_used) < config['disk_percent'],
+                    f"disk: {mount} usage or inodes >= {config['disk_percent']}%; inspect df -h and df -i")
+        except OSError:
+            failures.append(f'disk: cannot inspect {mount}')
+
+    backups = list(Path('/opt/omni/backups').glob('omni-backup-*.tar.gz'))
+    newest = max(backups, key=lambda path: path.stat().st_mtime, default=None)
+    require(newest is not None and time.time() - newest.stat().st_mtime < config['backup_hours'] * 3600,
+            'Omni backup: missing or stale archive; inspect omni-backup journal')
+    if newest:
+        stat = newest.stat()
+        require(stat.st_uid == 0 and stat.st_gid == 0 and stat.st_mode & 0o777 == 0o600,
+                'Omni backup: archive must be root:root mode 0600')
+    for unit in config['scheduled_services']:
+        require(recent_success(unit, config['backup_hours']),
+                f'{unit}: no recent successful run or latest run failed; inspect journalctl -u {unit}')
+    for certificate in config['certificates']:
+        require(command(['openssl', 'x509', '-in', certificate, '-noout', '-checkend',
+                         str(14 * 86400)]).returncode == 0,
+                f'TLS: {certificate} expires within 14 days or is unreadable; inspect Certbot')
+    return sorted(failures)
+
+
+def write_status(path, report):
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(report) + '\n')
+    temporary.chmod(0o600)
+    temporary.replace(path)
+
+
+def publish(failures):
+    try:
+        previous = json.loads(STATUS.read_text())
+    except (OSError, ValueError):
+        previous = {}
+    report = {'host': 'control-01', 'checked_at': datetime.datetime.now(datetime.UTC).isoformat(),
+              'healthy': not failures, 'failures': failures}
+    STATUS.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    write_status(STATUS, report)
+    if previous.get('failures') != failures:
+        print(json.dumps(report), flush=True)
+    # Track delivery separately: a temporarily broken adapter must not silence
+    # an incident after local status was saved. Retry once per timer execution.
+    try:
+        delivered = json.loads(NOTIFICATION_STATUS.read_text())
+    except (OSError, ValueError):
+        delivered = {}
+    if delivered.get('failures') != failures and NOTIFIER.is_file() and os.access(NOTIFIER, os.X_OK):
+        try:
+            result = subprocess.run([str(NOTIFIER)], input=json.dumps(report),
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    text=True, timeout=20)
+            if result.returncode == 0:
+                write_status(NOTIFICATION_STATUS, report)
+            else:
+                print('control-health: external notification adapter failed', file=sys.stderr)
+        except (OSError, subprocess.TimeoutExpired):
+            print('control-health: external notification adapter failed', file=sys.stderr)
+    return 1 if failures else 0
+
+
+def main():
+    os.umask(0o077)
+    try:
+        failures = collect(json.loads(CONFIG.read_text()))
+    except Exception:
+        # Do not print exceptions: a subprocess/response/config can carry private data.
+        failures = ['control-health: probe execution failed; inspect health configuration and service permissions']
+    return publish(failures)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

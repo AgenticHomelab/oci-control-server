@@ -1,0 +1,17 @@
+---
+- name: Prepare Omni directories
+  ansible.builtin.import_tasks: directories.yml
+
+- name: Configure Omni deployment
+  ansible.builtin.import_tasks: configuration.yml
+  tags: [omni_auth_credentials]
+
+- name: Verify Omni Vault authentication separately
+  ansible.builtin.import_tasks: verify.yml
+
+- name: Manage Omni runtime
+  ansible.builtin.import_tasks: runtime.yml
+  tags: [omni_auth_consumers]
+
+- name: Configure Omni backups
+  ansible.builtin.import_tasks: backup.yml

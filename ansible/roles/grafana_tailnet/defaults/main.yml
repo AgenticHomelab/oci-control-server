@@ -1,0 +1,3 @@
+---
+grafana_tailnet_deploy: false
+grafana_tailnet_state: present

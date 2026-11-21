@@ -1,0 +1,12 @@
+[Unit]
+Description=Create the daily local Omni application-state backup
+
+[Timer]
+OnCalendar={{ omni_backup_calendar }}
+Persistent=true
+RandomizedDelaySec=15m
+AccuracySec=1m
+Unit=omni-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,135 @@
+---
+kubectl_version: "v1.37.1"
+talosctl_version: "v1.13.5"
+flux_version: "2.9.6"
+helm_version: "4.3.0"
+
+# Pinned official OpenTofu CLI for the isolated Hermes TrueNAS preparation play.
+truenas_opentofu_version: "1.12.6"
+truenas_opentofu_arm64_sha256: "e573979ba68a17fe7b881752051a694a7efcd970e39521f6a25775197861ed4d"
+
+tailscale_oauth_client_secret: >-
+  {{ lookup('ansible.builtin.env', 'TAILSCALE_OAUTH_CLIENT_SECRET') }}
+tailscale_hostname: control-01
+tailscale_advertise_tags: tag:recovery
+ubuntu_pro_token: >-
+  {{ lookup('ansible.builtin.env', 'UBUNTU_PRO_TOKEN') }}
+cloudflare_api_token: >-
+  {{ lookup('ansible.builtin.env', 'CLOUDFLARE_API_TOKEN') }}
+
+# Exact observed production source revision; normal applies do not upgrade it.
+hermes_install_commit: "4e3fcd5cd7e40c37cb6f9a21a76fc57a7361957a"
+hermes_node_version: "26.7.0"
+hermes_npm_version: "12.0.2"
+# Verified App authentication; signing PEM was bootstrapped by the operator.
+hermes_github_app_enabled: true
+# Pinned Vault metadata verified during bootstrap; host IAM/retrieval stay disabled.
+hermes_github_app_key_enabled: false
+hermes_github_app_vault_version_number: 1
+hermes_github_app_allow_key_rotation: false
+hermes_certificate_domains:
+  - "{{ hermes_hostname }}"
+hermes_dashboard_bind_address: 127.0.0.1
+hermes_dashboard_port: 9119
+# Existing credentials migrated without rotation; reader IAM is scoped to this secret.
+# Stable API credential retains its existing Hermes-owned dotenv materialization.
+hermes_api_secret_source: oci_vault
+hermes_api_vault_region: eu-stockholm-1
+hermes_api_vault_version_number: 1
+
+hermes_dashboard_secret_source: oci_vault
+hermes_dashboard_vault_region: eu-stockholm-1
+# Pin the independently validated initial credential set.
+hermes_dashboard_vault_version_number: 1
+hermes_dashboard_vault_allow_rotation: false
+hermes_dashboard_username: >-
+  {{ lookup('ansible.builtin.env', 'HERMES_DASHBOARD_BASIC_AUTH_USERNAME') }}
+hermes_dashboard_password_hash: >-
+  {{ lookup('ansible.builtin.env', 'HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH') }}
+hermes_dashboard_auth_secret: >-
+  {{ lookup('ansible.builtin.env', 'HERMES_DASHBOARD_BASIC_AUTH_SECRET') }}
+
+# Production Certbot uses the existing Vault secret through the host Instance Principal.
+# Keep this OCID aligned with OpenTofu control_cloudflare_secret_ocid (reader IAM).
+# Explicit -e cloudflare_tls_secret_source=environment enables bootstrap/rollback.
+cloudflare_tls_secret_source: oci_vault
+cloudflare_vault_region: eu-stockholm-1
+# null selects CURRENT; pin a positive version only for approved version rollback.
+cloudflare_vault_version_number: null
+
+
+# DNS ownership remains with the edge role, while values are private.
+# Private Cloudflare DNS records come from the approved private Ansible vars file.
+
+# Omni
+#
+# The migrated identity and persistent state are active on control-01. Never
+# run omni-01 concurrently with this runtime.
+# Pinned existing Omni/Dex values; source change never rotates/recreates consumers.
+omni_auth_secret_source: oci_vault
+omni_auth_vault_region: eu-stockholm-1
+omni_auth_vault_version_number: 1
+
+omni_runtime_enabled: true
+omni_edge_enabled: true
+
+omni_version: "v1.12.3"
+omni_dex_version: "v2.41.1"
+
+omni_certificate_domains:
+  - "{{ omni_hostname }}"
+  - "{{ omni_api_hostname }}"
+  - "{{ omni_kube_hostname }}"
+
+# OCI public IPv4 is NATed to this private interface address.
+
+
+omni_account_uuid: >-
+  {{ lookup('ansible.builtin.env', 'OMNI_ACCOUNT_UUID') }}
+omni_user_email: >-
+  {{ lookup('ansible.builtin.env', 'OMNI_USER_EMAIL') }}
+omni_oidc_client_secret: >-
+  {{ lookup('ansible.builtin.env', 'OMNI_OIDC_CLIENT_SECRET') }}
+omni_dex_admin_password_hash: >-
+  {{ lookup('ansible.builtin.env', 'OMNI_DEX_ADMIN_PASSWORD_HASH') }}
+
+omni_dex_admin_email: >-
+  {{ lookup('ansible.builtin.env', 'OMNI_DEX_ADMIN_EMAIL') }}
+omni_dex_admin_username: admin
+
+omni_backup_retention_days: 14
+omni_backup_calendar: "*-*-* 02:15:00 UTC"
+
+# Enable only after the dedicated OCI bucket, dynamic group and policy have
+# been approved and applied. The private decryption identity stays off-host.
+omni_offsite_backup_enabled: >-
+  {{
+    lookup('ansible.builtin.env', 'OMNI_OFFSITE_BACKUP_ENABLED') |
+    default('false', true) | bool
+  }}
+omni_offsite_backup_region: eu-stockholm-1
+omni_offsite_backup_age_recipient: >-
+  {{ lookup('ansible.builtin.env', 'BACKUP_AGE_RECIPIENT') }}
+omni_offsite_backup_oci_cli_version: "3.90.3"
+# Garage app backups passed independent restore acceptance; retain the OCI
+# objects through the separate exact-manifest deletion approval.
+omni_offsite_backup_target: truenas
+omni_garage_ca_mount_enabled: true
+# Operator-side OCI Vault authority; pin the imported, verified bundle.
+truenas_backup_s3_vault_version: 1
+truenas_backup_bucket: "{{ lookup('ansible.builtin.env', 'TRUENAS_BACKUP_BUCKET') }}"
+truenas_backup_endpoint: "{{ lookup('ansible.builtin.env', 'TRUENAS_BACKUP_ENDPOINT') }}"
+truenas_backup_region: garage
+# Controller-local public CA file, never disable TLS hostname verification.
+truenas_backup_ca_source: "{{ lookup('ansible.builtin.env', 'TRUENAS_BACKUP_CA_SOURCE') }}"
+hermes_offsite_snapshot_local_retention: 3
+
+# Failure hooks record immediate local events; periodic probes cover hangs,
+# unavailable HTTP endpoints, stale backups, disk pressure and user services.
+control_health_failure_units:
+  - nginx.service
+  - docker.service
+  - tailscaled.service
+  - omni-backup.service
+  - omni-offsite-backup.service
+  - certbot.service

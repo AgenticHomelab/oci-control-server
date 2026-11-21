@@ -1,0 +1,68 @@
+---
+- name: Require Loki readiness before changing consumers
+  ansible.builtin.import_role:
+    name: loki
+    tasks_from: ready
+  when: not (observability_loki_disable | default(false) | bool)
+
+- name: Select logging for this render including check mode
+  ansible.builtin.set_fact:
+    observability_loki_marker:
+      stat:
+        exists: "{{ not (observability_loki_disable | default(false) | bool) }}"
+
+- name: Configure Alloy preserving every host metric component
+  ansible.builtin.template:
+    src: config.alloy.j2
+    dest: /etc/alloy/config.alloy
+    owner: root
+    group: alloy
+    mode: "0640"
+    validate: /usr/bin/alloy validate %s
+  notify: Restart observability Alloy
+
+- name: Persist explicit Loki integration selection
+  ansible.builtin.copy:
+    dest: /etc/alloy/control-loki.enabled
+    content: "Managed by the isolated Loki integration play.\n"
+    owner: root
+    group: root
+    mode: "0644"
+  when: not (observability_loki_disable | default(false) | bool)
+
+- name: Remove selection during explicit logging rollback
+  ansible.builtin.file:
+    path: /etc/alloy/control-loki.enabled
+    state: absent
+  when: observability_loki_disable | default(false) | bool
+
+- name: Provision reproducible local Loki datasource
+  ansible.builtin.copy:
+    src: loki-datasource.yml
+    dest: /etc/grafana/provisioning/datasources/control-loki.yml
+    owner: root
+    group: grafana
+    mode: "0640"
+  when: not (observability_loki_disable | default(false) | bool)
+  notify: Restart observability Grafana
+
+- name: Remove Loki datasource through native provisioning during rollback
+  ansible.builtin.copy:
+    dest: /etc/grafana/provisioning/datasources/control-loki.yml
+    content: |
+      apiVersion: 1
+      deleteDatasources:
+        - name: Loki
+          orgId: 1
+    owner: root
+    group: grafana
+    mode: "0640"
+  when: observability_loki_disable | default(false) | bool
+  notify: Restart observability Grafana
+
+- name: Apply only integration consumer handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify existing metrics and authentication after integration
+  ansible.builtin.import_tasks: verify.yml
+  when: not ansible_check_mode

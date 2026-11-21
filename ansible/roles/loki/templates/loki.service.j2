@@ -1,0 +1,30 @@
+[Unit]
+Description=Loki single-binary local logs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=loki
+Group=loki
+ExecStart=/opt/loki/{{ loki_version }}/loki-linux-arm64 -config.file=/etc/loki/config.yml
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=120
+UMask=0027
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/loki
+MemoryHigh=1G
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

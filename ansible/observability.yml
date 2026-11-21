@@ -1,0 +1,11 @@
+---
+# Deliberately separate from playbook.yml: never reconcile existing consumers.
+- name: Configure native host metrics
+  hosts: control
+  become: true
+  gather_facts: true
+  # Package hooks must not restart unrelated, already-running consumers.
+  environment:
+    NEEDRESTART_MODE: l
+  roles:
+    - observability
