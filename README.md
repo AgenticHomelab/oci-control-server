@@ -1,9 +1,8 @@
 # OCI Control Server
 
 Declarative infrastructure and host configuration for a homelab management
-server. This is the published public OCI desired-state source, not a deployment
-controller. Existing private production invocations remain selected until a
-separately reviewed execution-path cutover.
+server. The published source is used for normal OCI OpenTofu and control-host
+Ansible operations.
 
 OpenTofu declares the OCI compute, network and infrastructure metadata.
 Ansible declares persistent host configuration, including Omni, Hermes,
@@ -39,9 +38,8 @@ live verification gate.
 
 `docs/private-publication-inputs.md` explains the private execution-input
 contract. The existing private repository retains operational recovery evidence
-and its separate Hermes operational playbooks. Operator-reported acceptance of
-the published source found an unchanged original-backend, locked and refreshing
-OpenTofu plan and reviewed selected Ansible render parity. This is not evidence
-of an already switched production invocation, off-host recovery, or permission
-to apply changes. Each runtime source switch still requires explicit operator
-approval, correct protected inputs, preserved rollback, and recovery checks.
+and its separate Hermes operational playbooks. On the selected execution paths, live verification matched the original
+backend and state, produced a locked, refreshing plan with zero proposed
+actions, and reproduced the selected host templates. Apply and other
+production reconciliation require separate authorization. Independent
+off-host restoration and Vaultwarden recovery retrieval remain unverified.
