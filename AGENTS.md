@@ -1,8 +1,8 @@
 # Repository contributor and agent instructions
 
-This source is intended to be a **new public repository with no inherited Git
-history** after a separate publication review. Treat this file as an operating
-contract, not deployment or credential authorization.
+This repository is the published, clean-history public desired-state source
+for the OCI control server. Treat these instructions as an operating contract,
+not authorization for deployment, state migration or credential access.
 
 - Read the current `main` implementation and the scoped runbook before edits.
 - Write code and documentation in English and use Conventional Commits.
@@ -25,4 +25,8 @@ contract, not deployment or credential authorization.
 - Report verified checks accurately; a passing offline CI does not prove
   state, deployment, backup or restoration success.
 
-Publication requires a separate final-content audit and explicit go/no-go.
+An approved source-level review does not switch existing production commands,
+scheduled tasks or private Hermes operational playbook ownership. Changing an
+execution path requires a separately reviewed operator approval, complete
+protected inputs, preserved original backend and native locks, a fresh
+no-unexpected-change plan, and appropriate rollback and independent recovery.
