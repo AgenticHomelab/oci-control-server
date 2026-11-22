@@ -71,6 +71,13 @@ def test_omni_renewal_env_path_is_supplied_from_private_inputs():
     assert "omni.env" not in service
 
 
+def test_sudoers_policy_is_private_and_validated_before_installation():
+    tasks = (ROLE / "tasks/operational-access.yml").read_text()
+    assert "sudoers/hermes-admin" in tasks
+    assert "visudo -cf" in tasks
+    assert "NOPASSWD" not in tasks
+
+
 def test_native_dispatch_and_key_renewal_remain_opt_in():
     dispatch = (ROLE / "tasks/renovate-nightly-dispatch.yml").read_text()
     renewal = (ROLE / "tasks/omni-key-renewal.yml").read_text()
