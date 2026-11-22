@@ -25,12 +25,10 @@ not authorization for deployment, state migration or credential access.
 - Report verified checks accurately; a passing offline CI does not prove
   state, deployment, backup or restoration success.
 
-The isolated Hermes operational playbooks are staged in this public
-repository and load approved private assets from
-`AgenticHomelab/homelab-secrets/operations/hermes/`. They are not part of the
-normal host playbook. Until a separately authorized live source handover,
-the original private `antief/oci-control-server` remains the deployed
-operations owner and rollback source. See `docs/hermes-operations-source.md`.
+Use the isolated Hermes Ansible playbooks and the approved private assets
+in `AgenticHomelab/homelab-secrets/operations/hermes/`. The isolated plays
+have their own entrypoints. See [the Hermes source contract](docs/hermes-operations-source.md)
+for exact-file, check-mode and runtime acceptance.
 
 An approved source-level review does not switch existing production commands,
 scheduled tasks or private Hermes operational playbook ownership. Changing an

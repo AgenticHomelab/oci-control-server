@@ -1,9 +1,9 @@
 # Native Hermes operations source handover
 
-This repository stages the **Ansible-owned** implementations that were still
-maintained in `antief/oci-control-server` after normal OCI source migration.
-Their current **installed** state remains unchanged. Do not interpret this
-document or a source PR merge as a host cutover.
+This repository owns the isolated **Ansible** implementation for native Hermes
+operations. The operator accepted the live source handover on 2026-11-22
+after exact-file comparison, bounded reconciliation and read-back. Native
+job identities, schedules, delivery and existing credentials were preserved.
 
 ## Source ownership
 
@@ -12,7 +12,6 @@ document or a source PR merge as a host cutover.
 | `AgenticHomelab/oci-control-server/ansible/` | Isolated Ansible playbooks, roles, systemd unit templates, pinned host tooling |
 | `AgenticHomelab/homelab-secrets/operations/hermes/` | Private fleet prompts and skills, native scheduler job registry, current Omni key renewal helper and private operational runbooks |
 | Existing protected operator and host files / OCI Vault | Credentials, recovery identities, full protected input maps and backend selectors |
-| `antief/oci-control-server` | **Currently deployed** Hermes operational source and rollback until separately accepted cutover |
 
 These entrypoints are isolated: none is imported by `ansible/playbook.yml`
 or by `ansible/roles/hermes/tasks/main.yml`. No new runner, daemon or
@@ -49,14 +48,14 @@ to an approved repository for every `gh` command through the Hermes wrapper.
 Git HTTPS selects the repository from the remote URL. The App identity,
 signing key and token permissions remain under their existing custody.
 
-## Cutover acceptance
+## Verification for future changes
 
-1. Freeze and compare the old private operations revision, the new public
-   role/playbooks and the exact private asset revisions. Review real privacy
-   inputs and the installed file paths without emitting their contents.
+1. Record the exact public playbook and private asset revisions. Compare them
+   with the installed files and validate protected inputs without logging
+   values.
 2. Confirm the approved native runner can read both new checkouts and still
    resolve the original protected inventory, host overlays, recovery inputs
-   and GitHub App identity. Keep the old private checkout available.
+   and GitHub App identity. Retain the prior reviewed files for rollback.
 3. Validate syntax and controller-side source resolution. Run the existing
    isolated playbooks in check mode with their current reviewed variables.
    Inspect **every predicted change**; no all-roles production play.
@@ -64,12 +63,11 @@ signing key and token permissions remain under their existing custody.
    new playbooks, inspect the bounded apply and verify byte-identical assets,
    idempotence, enabled systemd timers, existing native Hermes job IDs,
    schedules, delivery, GitHub dispatch and host read-only health.
-5. Verify independent rollback using the retained original private checkout.
-   Only then remove installed execution dependencies on the legacy Git
-   source and consider archiving the legacy repository. Permanent deletion
-   must not precede replacement of recovery Git references and custody.
+5. Verify rollback from the retained protected files and current organization
+   sources. Keep the exact native job metadata available for in-place prompt
+   rollback. Review any scheduler or identity change as a separate operation.
 
 Do not force an Omni renewal, rotate keys, replay nightly maintenance, start
 a second Renovate merger or perform an OpenTofu apply to demonstrate source
-migration. The original private operations and recovery evidence remain
-available for rollback pending the live acceptance.
+migration. The private [recovery runbook](https://github.com/AgenticHomelab/homelab-secrets/blob/main/operations/hermes/runbooks/control-host-recovery.md)
+describes recovery from the current sources.
