@@ -4,6 +4,14 @@ This repository is the published, clean-history public desired-state source
 for the OCI control server. Treat these instructions as an operating contract,
 not authorization for deployment, state migration or credential access.
 
+**The cross-repository source migration is closed (2026-11-22).** This
+repository is the accepted production OCI OpenTofu, Ansible and isolated Hermes
+operations source; private Hermes assets are owned by
+`AgenticHomelab/homelab-secrets`. Former `antief/*` repositories are archived
+historical references, not active execution or recovery dependencies. Dated
+handover plans do not imply another pending cutover. Future production changes
+still require their own authorization and verification.
+
 - Read the current `main` implementation and the scoped runbook before edits.
 - Write code and documentation in English and use Conventional Commits.
 - Work on focused branches with reviewed PRs; never push directly to `main`.
