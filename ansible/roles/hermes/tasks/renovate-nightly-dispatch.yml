@@ -1,0 +1,48 @@
+---
+# Isolated, opt-in workflow. Normal host and Hermes plays never import it.
+- name: Require the reviewed single control host
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'control-01'
+      - ansible_play_hosts_all | length == 1
+      - >-
+        not (talos_renovate_dispatch_enabled | default(false) | bool)
+        or (talos_renovate_dispatch_reviewed | default(false) | bool)
+    fail_msg: Review the GitHub workflow and host timer before activation.
+
+- name: Check existing GitHub App authenticated gh wrapper
+  ansible.builtin.stat:
+    path: /home/hermes/.local/bin/gh
+    follow: false
+    get_checksum: false
+  register: renovate_dispatch_gh
+
+- name: Require the existing root-managed Hermes gh wrapper
+  ansible.builtin.assert:
+    that:
+      - renovate_dispatch_gh.stat.isreg | default(false)
+      - renovate_dispatch_gh.stat.pw_name | default('') == 'root'
+      - renovate_dispatch_gh.stat.mode | default('') == '0755'
+    fail_msg: The approved root-managed GitHub App gh wrapper is not installed.
+
+- name: Install native Renovate dispatch units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - talos-renovate-dispatch.service
+    - talos-renovate-dispatch.timer
+  when: ansible_check_mode or (talos_renovate_dispatch_reviewed | default(false) | bool)
+
+- name: Enable or disable the explicitly reviewed dispatch timer
+  ansible.builtin.systemd_service:
+    name: talos-renovate-dispatch.timer
+    daemon_reload: true
+    enabled: "{{ talos_renovate_dispatch_enabled | default(false) | bool }}"
+    state: "{{ 'started' if talos_renovate_dispatch_enabled | default(false) | bool else 'stopped' }}"
+  when:
+    - talos_renovate_dispatch_reviewed | default(false) | bool
+    - not ansible_check_mode

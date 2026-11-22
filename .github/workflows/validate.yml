@@ -41,12 +41,12 @@ jobs:
         working-directory: ansible
         run: |
           set -euo pipefail
-          for play in grafana-backup.yml grafana-tailnet-dns.yml grafana-tailnet.yml loki.yml observability.yml omni-garage-ca.yml playbook.yml talos-metrics-receiver.yml talos-logs-receiver.yml; do
+          for play in grafana-backup.yml grafana-tailnet-dns.yml grafana-tailnet.yml hermes-fleet-health.yml hermes-omni-key-renewal.yml hermes-operational-access.yml hermes-truenas-opentofu.yml loki.yml observability.yml omni-garage-ca.yml playbook.yml talos-metrics-receiver.yml talos-logs-receiver.yml talos-renovate-dispatch.yml; do
             "$RUNNER_TEMP/public-venv/bin/ansible-playbook" -i localhost, "$play" --syntax-check
           done
       - name: Run selected synthetic receiver contracts
         run: |
-          PATH="$RUNNER_TEMP/public-venv/bin:$PATH" "$RUNNER_TEMP/public-venv/bin/python" -m pytest -q tests/test_talos_metrics_receiver.py tests/test_public_hermes_github_app.py
+          PATH="$RUNNER_TEMP/public-venv/bin:$PATH" "$RUNNER_TEMP/public-venv/bin/python" -m pytest -q tests/test_talos_metrics_receiver.py tests/test_public_hermes_github_app.py tests/test_hermes_operations_source.py
       - name: Assemble clean tracked-file scan tree
         run: |
           set -euo pipefail

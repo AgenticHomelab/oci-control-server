@@ -1,0 +1,11 @@
+[Unit]
+Description=Trigger Talos Renovate GitHub Actions merges overnight
+
+[Timer]
+OnCalendar=*-*-* 00..03:15,45 Europe/Helsinki
+AccuracySec=1min
+Persistent=false
+Unit=talos-renovate-dispatch.service
+
+[Install]
+WantedBy=timers.target

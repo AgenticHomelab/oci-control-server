@@ -1,0 +1,16 @@
+[Unit]
+Description=Dispatch Talos Renovate merge sweeps to GitHub Actions
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=hermes
+Group=hermes
+UMask=0077
+WorkingDirectory=/home/hermes
+Environment=HOME=/home/hermes
+Environment=PATH=/home/hermes/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=GH_REPO=AgenticHomelab/talos-cluster
+ExecStart=/home/hermes/.local/bin/gh api --silent -X POST repos/AgenticHomelab/talos-cluster/dispatches -f event_type=renovate-nightly-merge
+TimeoutStartSec=90s

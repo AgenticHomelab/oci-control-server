@@ -1,0 +1,83 @@
+---
+- name: Require explicit private Hermes operations source
+  ansible.builtin.assert:
+    that:
+      - hermes_private_operations_dir is defined
+      - hermes_private_operations_dir is match('^/')
+    fail_msg: Supply the private organization checkout for Hermes operational assets.
+
+- name: Require protected Omni credential environment selector
+  ansible.builtin.assert:
+    that:
+      - hermes_omni_credential_file is defined
+      - hermes_omni_credential_file.startswith('/home/hermes/')
+      - "'..' not in hermes_omni_credential_file"
+    fail_msg: Supply the existing Omni environment path through protected inputs.
+
+# Isolated opt-in deployment. Normal Hermes/host roles do not import this file.
+- name: Require the expected single management host
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'control-01'
+      - ansible_play_hosts_all | length == 1
+      - >-
+        not (hermes_omni_key_renewal_enable | default(false) | bool)
+        or (hermes_omni_key_renewal_reviewed | default(false) | bool)
+    fail_msg: >-
+      Review the exact change and verify the active Admin key before enabling
+      the dedicated native renewal timer on control-01.
+
+- name: Ensure dedicated native helper directory exists
+  ansible.builtin.file:
+    path: /usr/local/libexec
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install credential-safe scoped key transaction
+  ansible.builtin.copy:
+    src: "{{ hermes_private_operations_dir }}/bin/hermes-omni-key-renew"
+    dest: /usr/local/libexec/hermes-omni-key-renew
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install inactive key renewal systemd units
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item | regex_replace('\\.j2$', '') }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - hermes-omni-key-renewal.service.j2
+    - hermes-omni-key-renewal.timer.j2
+  register: hermes_omni_renewal_units
+
+- name: Check the live Admin key before enabling its timer
+  become_user: hermes
+  ansible.builtin.shell: |
+    set +x
+    set -eu
+    set -a
+    . {{ hermes_omni_credential_file }}
+    set +a
+    exec /usr/bin/python3 /usr/local/libexec/hermes-omni-key-renew --check
+  args:
+    executable: /bin/bash
+  changed_when: false
+  no_log: true
+  when:
+    - hermes_omni_key_renewal_enable | default(false) | bool
+    - not ansible_check_mode
+
+- name: Enable only the reviewed native renewal timer
+  ansible.builtin.systemd_service:
+    name: hermes-omni-key-renewal.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+  when:
+    - hermes_omni_key_renewal_enable | default(false) | bool
+    - not ansible_check_mode

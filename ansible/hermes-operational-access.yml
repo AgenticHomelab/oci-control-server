@@ -1,0 +1,17 @@
+---
+# Isolated native access/toolchain deployment; no gateway/service restart.
+- name: Configure trusted Hermes administration on control-01
+  hosts: control
+  become: true
+  gather_facts: false
+  environment:
+    NEEDRESTART_MODE: l
+  tasks:
+    - name: Install only operational access configuration
+      ansible.builtin.import_role:
+        name: hermes
+        tasks_from: operational-access
+    - name: Reuse the existing management toolchain
+      ansible.builtin.import_role:
+        name: toolchain
+      when: hermes_admin_enabled | bool

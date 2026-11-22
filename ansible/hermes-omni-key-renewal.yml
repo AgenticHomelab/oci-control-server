@@ -1,0 +1,11 @@
+---
+# Explicit opt-in, not part of the normal host or Hermes deployment.
+- name: Stage or enable native Hermes Omni service-account key renewal
+  hosts: control
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Reconcile only the dedicated Omni key renewal configuration
+      ansible.builtin.import_role:
+        name: hermes
+        tasks_from: omni-key-renewal

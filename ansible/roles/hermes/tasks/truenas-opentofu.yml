@@ -1,0 +1,117 @@
+---
+# Isolated, inert TrueNAS OpenTofu host preparation. No credentials or backend access.
+- name: Verify the designated Hermes OpenTofu host
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'control-01'
+      - ansible_facts['system'] == 'Linux'
+      - ansible_facts['architecture'] == 'aarch64'
+    fail_msg: TrueNAS OpenTofu preparation is supported only on control-01 (Linux arm64).
+
+- name: Require pinned OpenTofu release metadata
+  ansible.builtin.assert:
+    that:
+      - truenas_opentofu_version is match('^[0-9]+[.][0-9]+[.][0-9]+$')
+      - truenas_opentofu_arm64_sha256 is match('^[a-f0-9]{64}$')
+
+- name: Check whether a canonical OpenTofu binary is already managed
+  ansible.builtin.stat:
+    path: /usr/local/bin/tofu
+    follow: false
+  register: truenas_opentofu_existing
+
+- name: Refuse to replace an unrelated OpenTofu executable
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (truenas_opentofu_existing.stat.exists | default(false))
+        or ((truenas_opentofu_existing.stat.islnk | default(false))
+        and (truenas_opentofu_existing.stat.lnk_source | default(''))
+        is match('^/opt/opentofu/[0-9]+[.][0-9]+[.][0-9]+/tofu$'))
+
+- name: Install pinned OpenTofu archive prerequisite
+  ansible.builtin.apt:
+    name: unzip
+    state: present
+
+- name: Prepare versioned OpenTofu installation directory
+  ansible.builtin.file:
+    path: "/opt/opentofu/{{ truenas_opentofu_version }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download checksum-verified OpenTofu for Linux arm64
+  ansible.builtin.get_url:
+    url: >-
+      https://github.com/opentofu/opentofu/releases/download/v{{ truenas_opentofu_version }}/tofu_{{ truenas_opentofu_version }}_linux_arm64.zip
+    dest: "/opt/opentofu/{{ truenas_opentofu_version }}/tofu.zip"
+    checksum: "sha256:{{ truenas_opentofu_arm64_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: not ansible_check_mode
+
+- name: Extract pinned OpenTofu release
+  ansible.builtin.unarchive:
+    src: "/opt/opentofu/{{ truenas_opentofu_version }}/tofu.zip"
+    dest: "/opt/opentofu/{{ truenas_opentofu_version }}"
+    remote_src: true
+    creates: "/opt/opentofu/{{ truenas_opentofu_version }}/tofu"
+  when: not ansible_check_mode
+
+- name: Secure installed OpenTofu executable
+  ansible.builtin.file:
+    path: "/opt/opentofu/{{ truenas_opentofu_version }}/tofu"
+    state: file
+    owner: root
+    group: root
+    mode: "0755"
+  when: not ansible_check_mode
+
+- name: Link the pinned OpenTofu executable
+  ansible.builtin.file:
+    src: "/opt/opentofu/{{ truenas_opentofu_version }}/tofu"
+    dest: /usr/local/bin/tofu
+    state: link
+    owner: root
+    group: root
+    force: true
+  when: not ansible_check_mode
+
+- name: Verify the installed OpenTofu version
+  ansible.builtin.command:
+    argv: [/usr/local/bin/tofu, version, -json]
+  register: truenas_opentofu_version_result
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Require the exact pinned OpenTofu version
+  ansible.builtin.assert:
+    that: (truenas_opentofu_version_result.stdout | from_json).terraform_version == truenas_opentofu_version
+  when: not ansible_check_mode
+
+- name: Prepare Hermes private repository workspace
+  ansible.builtin.file:
+    path: /home/hermes/workspaces
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: "0700"
+
+- name: Prepare private TrueNAS OpenTofu inputs directory
+  ansible.builtin.file:
+    path: /home/hermes/.config/truenas-opentofu
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: "0700"
+
+- name: Prepare private TrueNAS OpenTofu plan directory
+  ansible.builtin.file:
+    path: /home/hermes/.local/state/truenas-opentofu
+    state: directory
+    owner: hermes
+    group: hermes
+    mode: "0700"
