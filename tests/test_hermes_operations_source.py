@@ -61,6 +61,15 @@ def test_private_assets_remain_outside_public_repository():
         assert not (ROLE / path).exists(), path
 
 
+def test_omni_renewal_env_path_is_supplied_from_private_inputs():
+    task = (ROLE / "tasks/omni-key-renewal.yml").read_text()
+    service = (ROLE / "templates/hermes-omni-key-renewal.service.j2").read_text()
+    assert "hermes_omni_credential_file is defined" in task
+    assert "{{ hermes_omni_credential_file }}" in task
+    assert "{{ hermes_omni_credential_file }}" in service
+    assert "/home/hermes/.config/hermes/omni.env" not in service
+
+
 def test_native_dispatch_and_key_renewal_remain_opt_in():
     dispatch = (ROLE / "tasks/renovate-nightly-dispatch.yml").read_text()
     renewal = (ROLE / "tasks/omni-key-renewal.yml").read_text()
