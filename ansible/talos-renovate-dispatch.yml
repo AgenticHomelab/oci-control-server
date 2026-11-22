@@ -1,0 +1,11 @@
+---
+# Explicitly invoked; never imported by the normal host configuration play.
+- name: Stage or activate Talos Renovate GitHub dispatch
+  hosts: control
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Reconcile only the Renovate dispatch systemd timer
+      ansible.builtin.import_role:
+        name: hermes
+        tasks_from: renovate-nightly-dispatch
