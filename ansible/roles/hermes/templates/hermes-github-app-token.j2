@@ -11,9 +11,7 @@ import sys
 import urllib.request
 
 APP_ID = {{ hermes_github_app_id | int }}
-LEGACY_INSTALLATION_ID = {{ hermes_github_app_legacy_installation_id | int }}
 ORGANIZATION_INSTALLATION_ID = {{ hermes_github_app_organization_installation_id | int }}
-LEGACY_REPOS = {{ hermes_github_app_legacy_repositories | to_json }}
 ORGANIZATION_REPOS = {{ hermes_github_app_organization_repositories | to_json }}
 PERMISSIONS = {"contents": "write", "pull_requests": "write",
                "issues": "write", "actions": "read", "checks": "read",
@@ -54,25 +52,16 @@ def jwt(now):
 
 
 def mint(repository=None):
-    if repository is None:
-        installation_id = LEGACY_INSTALLATION_ID
-        repository_ids = list(LEGACY_REPOS.values())
-    else:
-        name = repository.lower()
-        if name in LEGACY_REPOS:
-            installation_id = LEGACY_INSTALLATION_ID
-            repository_ids = [LEGACY_REPOS[name]]
-        elif name in ORGANIZATION_REPOS:
-            installation_id = ORGANIZATION_INSTALLATION_ID
-            repository_ids = [ORGANIZATION_REPOS[name]]
-        else:
-            raise TokenError()
+    name = repository.lower() if repository else ""
+    if name not in ORGANIZATION_REPOS:
+        raise TokenError()
+    repository_ids = [ORGANIZATION_REPOS[name]]
 
     safe_key(KEY)
     now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
     request = urllib.request.Request(
         "https://api.github.com/app/installations/"
-        + str(installation_id) + "/access_tokens",
+        + str(ORGANIZATION_INSTALLATION_ID) + "/access_tokens",
         data=json.dumps({"repository_ids": repository_ids,
                          "permissions": PERMISSIONS}).encode("utf-8"),
         headers={"Accept": "application/vnd.github+json",

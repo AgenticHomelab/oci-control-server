@@ -2,14 +2,11 @@
 # The App token is short-lived and never stored in gh's credential database.
 set -eu
 unset GH_TOKEN GITHUB_TOKEN
-mint_token() {
-    if [ -n "${GH_REPO:-}" ]; then
-        /usr/bin/sudo -n /usr/local/libexec/hermes-github-app-token "${GH_REPO#github.com/}"
-    else
-        /usr/bin/sudo -n /usr/local/libexec/hermes-github-app-token
-    fi
-}
-GH_TOKEN="$(mint_token)" || {
+if [ -z "${GH_REPO:-}" ]; then
+    echo "Set GH_REPO to an approved repository before invoking gh" >&2
+    exit 1
+fi
+GH_TOKEN="$(/usr/bin/sudo -n /usr/local/libexec/hermes-github-app-token "${GH_REPO#github.com/}")" || {
     echo "Hermes GitHub App token unavailable" >&2
     exit 1
 }

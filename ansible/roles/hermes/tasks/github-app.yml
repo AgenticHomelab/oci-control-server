@@ -4,11 +4,7 @@
   ansible.builtin.assert:
     that:
       - hermes_github_app_id | default(0) | int > 0
-      - hermes_github_app_legacy_installation_id | default(0) | int > 0
       - hermes_github_app_organization_installation_id | default(0) | int > 0
-      - hermes_github_app_legacy_repositories is defined
-      - hermes_github_app_legacy_repositories | default({}) | type_debug == 'dict'
-      - hermes_github_app_legacy_repositories | default({}) | length > 0
       - hermes_github_app_organization_repositories is defined
       - hermes_github_app_organization_repositories | default({}) | type_debug == 'dict'
       - hermes_github_app_organization_repositories | default({}) | length > 0
