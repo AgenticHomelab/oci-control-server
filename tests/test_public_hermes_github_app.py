@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import re
 from pathlib import Path
 import runpy
@@ -18,9 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "ansible/roles/hermes/templates"
 SELECTORS = {
     "hermes_github_app_id": 123,
-    "hermes_github_app_legacy_installation_id": 456,
     "hermes_github_app_organization_installation_id": 789,
-    "hermes_github_app_legacy_repositories": {"example/legacy": 111},
     "hermes_github_app_organization_repositories": {"example/new": 222},
     "hermes_github_app_key_file": "/etc/synthetic-key/app-signing.pem",
     "hermes_github_app_metadata_file": "/etc/synthetic-key/selector.json",
@@ -39,14 +38,12 @@ def test_token_minter_uses_private_selectors_and_rejects_other_repositories():
     token = types.ModuleType("synthetic_github_token")
     exec(compile(source, "synthetic_github_token", "exec"), token.__dict__)
     assert token.APP_ID == 123
-    assert token.LEGACY_INSTALLATION_ID == 456
     assert token.ORGANIZATION_INSTALLATION_ID == 789
-    assert token.LEGACY_REPOS == {"example/legacy": 111}
     assert token.ORGANIZATION_REPOS == {"example/new": 222}
     assert token.KEY == SELECTORS["hermes_github_app_key_file"]
     assert "synthetic-key" in source
     with patch.object(token, "safe_key") as opening_key:
-        for name in ("example/unauthorized", "another/legacy", ""):
+        for name in ("example/unauthorized", "example/legacy", "", None):
             with pytest.raises(token.TokenError):
                 token.mint(name)
         opening_key.assert_not_called()
@@ -57,7 +54,7 @@ def test_credential_helper_allows_only_rendered_repositories(tmp_path):
     helper.write_text(render("hermes-github-git-credential.j2"))
     assert "antief/" not in helper.read_text()
     for repo, approved in [
-        ("example/new.git", True), ("example/legacy.git", True),
+        ("example/new.git", True), ("example/legacy.git", False),
         ("example/unauthorized.git", False),
     ]:
         output = io.StringIO()
@@ -83,12 +80,22 @@ def test_credential_helper_allows_only_rendered_repositories(tmp_path):
             minted.assert_not_called()
 
 
+def test_gh_wrapper_requires_explicit_repository():
+    wrapper = ROOT / "ansible/roles/hermes/files/gh"
+    result = subprocess.run(["/bin/sh", str(wrapper), "version"],
+                            env={**os.environ, "GH_REPO": ""},
+                            text=True, capture_output=True, check=False)
+    assert result.returncode == 1
+    assert "Set GH_REPO" in result.stderr
+    assert result.stdout == ""
+
+
 def test_scope_assertion_precedes_installation():
     tasks = yaml.safe_load(
         (ROOT / "ansible/roles/hermes/tasks/github-app.yml").read_text()
     )
     assert "ansible.builtin.assert" in tasks[0]
-    assert "hermes_github_app_legacy_repositories is defined" in str(tasks[0])
+    assert "hermes_github_app_legacy_repositories" not in str(tasks[0])
     assert "hermes_github_app_organization_repositories is defined" in str(tasks[0])
     assert any(
         task.get("ansible.builtin.template", {}).get("src")

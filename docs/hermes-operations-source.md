@@ -42,7 +42,14 @@ nor its contents is committed to this public source. Private values in the
 native job registry, Ansible inventory, existing protected host overlays and
 Vault-selected credentials remain subject to their existing ownership.
 
-## Cutover acceptance, not performed by this PR
+## GitHub App repository selection
+
+The App helper uses the private organization repository map. Set `GH_REPO`
+to an approved repository for every `gh` command through the Hermes wrapper.
+Git HTTPS selects the repository from the remote URL. The App identity,
+signing key and token permissions remain under their existing custody.
+
+## Cutover acceptance
 
 1. Freeze and compare the old private operations revision, the new public
    role/playbooks and the exact private asset revisions. Review real privacy
