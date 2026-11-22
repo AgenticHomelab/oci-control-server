@@ -17,9 +17,7 @@
     group: root
     mode: "0440"
     validate: /usr/sbin/visudo -cf %s
-    content: |
-      # Trusted administrator for control-01; native sudo logging remains enabled.
-      hermes ALL=(ALL:ALL) NOPASSWD: ALL
+    src: "{{ hermes_private_operations_dir }}/sudoers/hermes-admin"
   when: hermes_admin_enabled | bool
 
 - name: Revoke the dedicated admin grant when disabled
