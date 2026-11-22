@@ -1,0 +1,17 @@
+---
+# Explicitly invoked host preparation; never run as part of the normal playbook.
+# This does not retrieve credentials, initialize remote state or execute plans.
+- name: Prepare native TrueNAS OpenTofu for Hermes
+  hosts: control
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Install pinned CLI and private workspace directories
+      ansible.builtin.import_role:
+        name: hermes
+        tasks_from: truenas-opentofu
+    - name: Install the approved Cloud Backup Vault selector when supplied
+      ansible.builtin.import_role:
+        name: hermes
+        tasks_from: truenas-opentofu-selector
+      when: hermes_truenas_cloud_backup_secret_ocid is defined
