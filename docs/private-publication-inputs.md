@@ -94,6 +94,6 @@ inputs. The public Omni access-policy file is a synthetic, non-deployable
 example. The production ACL and Hermes native fleet job identities, schedules
 and prompts remain in the private operations source and were not included
 in the public source. Their native owners and ongoing runtime behavior are
-unchanged. Validate the exact rendered source and current consumers before
-any cutover.
+unchanged. Normal OCI Ansible and OpenTofu use the published source. Verify
+rendered inputs and existing consumer contracts before any future source switch.
 

@@ -36,9 +36,12 @@ The generic [OCI Monitoring and Notifications runbook](docs/oci-monitoring-alert
 describes the optional, disabled-by-default alert resources and their separate
 live verification gate.
 
-`docs/private-publication-inputs.md` explains the private execution-input
-contract. The existing private repository retains operational recovery evidence
-and its separate Hermes operational playbooks. On the selected execution paths, live verification matched the original
+The [private input contract](docs/private-publication-inputs.md) describes the
+selected execution inputs. The original private `antief/oci-control-server`
+repository retains rollback, recovery evidence and the separate Hermes
+playbooks for fleet monitoring, administrative access preparation, Omni key
+renewal, TrueNAS OpenTofu access preparation and Renovate dispatch.
+On the selected execution paths, live verification matched the original
 backend and state, produced a locked, refreshing plan with zero proposed
 actions, and reproduced the selected host templates. Apply and other
 production reconciliation require separate authorization. Independent
