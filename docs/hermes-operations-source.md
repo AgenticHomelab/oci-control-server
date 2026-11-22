@@ -35,7 +35,10 @@ For the first three, explicitly provide `hermes_private_operations_dir`
 as an **absolute controller-local** path to a verified
 `homelab-secrets/operations/hermes` checkout. The public Ansible role loads
 the required private files directly from that path. It does not fetch,
-decrypt or synchronize the private repository itself. Private values in the
+decrypt or synchronize the private repository itself.
+The protected OCI input mapping also supplies `hermes_omni_credential_file`
+for the existing native Omni credential environment. Neither its exact path
+nor its contents is committed to this public source. Private values in the
 native job registry, Ansible inventory, existing protected host overlays and
 Vault-selected credentials remain subject to their existing ownership.
 
