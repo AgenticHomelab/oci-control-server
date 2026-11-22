@@ -1,0 +1,112 @@
+---
+- name: Require explicit private Hermes operations source
+  ansible.builtin.assert:
+    that:
+      - hermes_private_operations_dir is defined
+      - hermes_private_operations_dir is match('^/')
+    fail_msg: Set hermes_private_operations_dir to the protected AgenticHomelab/homelab-secrets operations/hermes checkout.
+
+- name: Require the intended host
+  ansible.builtin.assert:
+    that: inventory_hostname == 'control-01'
+
+- name: Configure native Hermes administrator access
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/hermes-admin
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+    content: |
+      # Trusted administrator for control-01; native sudo logging remains enabled.
+      hermes ALL=(ALL:ALL) NOPASSWD: ALL
+  when: hermes_admin_enabled | bool
+
+- name: Revoke the dedicated admin grant when disabled
+  ansible.builtin.file:
+    path: /etc/sudoers.d/hermes-admin
+    state: absent
+  when: not hermes_admin_enabled | bool
+
+- name: Remove superseded fixed-operation access files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/sudoers.d/hermes-operations
+    - /etc/sudoers.d/hermes-kubernetes-maintenance
+    - /usr/local/libexec/hermes-kubernetes-maintenance
+
+- name: Install native Ansible administration tools
+  ansible.builtin.apt:
+    name: ansible-core
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: hermes_admin_enabled | bool
+
+- name: Install version-matched Omni CLI
+  ansible.builtin.get_url:
+    url: "https://github.com/siderolabs/omni/releases/download/{{ omni_version }}/omnictl-linux-arm64"
+    checksum: "sha256:https://github.com/siderolabs/omni/releases/download/{{ omni_version }}/sha256sum.txt"
+    dest: /usr/local/bin/omnictl
+    owner: root
+    group: root
+    mode: "0755"
+  when: hermes_admin_enabled | bool
+
+- name: Manage active operational skill as Hermes
+  become: true
+  become_user: hermes
+  block:
+    - name: Create operational skill directory
+      ansible.builtin.file:
+        path: /home/hermes/.hermes/skills/devops/homelab-operations
+        state: directory
+        mode: "0750"
+    - name: Install operational skill
+      ansible.builtin.copy:
+        src: "{{ hermes_private_operations_dir }}/homelab-operations/SKILL.md"
+        dest: /home/hermes/.hermes/skills/devops/homelab-operations/SKILL.md
+        mode: "0640"
+    - name: Create documentation editing skill directory
+      ansible.builtin.file:
+        path: /home/hermes/.hermes/skills/devops/unslop
+        state: directory
+        mode: "0750"
+    - name: Install unmodified Unslop reference skill
+      ansible.builtin.copy:
+        src: "{{ hermes_private_operations_dir }}/unslop/SKILL.md"
+        dest: /home/hermes/.hermes/skills/devops/unslop/SKILL.md
+        mode: "0640"
+    - name: Create native Omni credential directory without provisioning secrets
+      ansible.builtin.file:
+        path: /home/hermes/.config/hermes
+        state: directory
+        mode: "0700"
+
+- name: Inspect only native Hermes approval mode
+  become: true
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+  ansible.builtin.command:
+    argv: [/home/hermes/.local/bin/hermes, config, get, approvals.mode]
+  register: hermes_native_approval_mode
+  changed_when: false
+  check_mode: false
+
+- name: Configure native approval behavior for the trusted administrator
+  become: true
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+  ansible.builtin.command:
+    argv:
+      - /home/hermes/.local/bin/hermes
+      - config
+      - set
+      - approvals.mode
+      - "{{ 'off' if hermes_admin_enabled | bool else 'smart' }}"
+  when: hermes_native_approval_mode.stdout | trim != ('off' if hermes_admin_enabled | bool else 'smart')
+  changed_when: true
