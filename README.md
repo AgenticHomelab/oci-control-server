@@ -37,10 +37,13 @@ describes the optional, disabled-by-default alert resources and their separate
 live verification gate.
 
 The [private input contract](docs/private-publication-inputs.md) describes the
-selected execution inputs. The original private `antief/oci-control-server`
-repository retains rollback, recovery evidence and the separate Hermes
-playbooks for fleet monitoring, administrative access preparation, Omni key
-renewal, TrueNAS OpenTofu access preparation and Renovate dispatch.
+selected execution inputs. The [native Hermes operations source handover](docs/hermes-operations-source.md)
+now stages the separate Hermes Ansible playbooks here. Protected prompts,
+job definitions and the Omni renewal helper are staged under
+`AgenticHomelab/homelab-secrets/operations/hermes/`. These files are
+**source-only**: the original private `antief/oci-control-server` remains
+the active installed operations source and retains rollback and recovery
+evidence until separately authorized live execution-path acceptance.
 On the selected execution paths, live verification matched the original
 backend and state, produced a locked, refreshing plan with zero proposed
 actions, and reproduced the selected host templates. Apply and other
