@@ -26,6 +26,7 @@ def test_all_legacy_operations_have_isolated_entrypoints():
             task["ansible.builtin.import_role"]["tasks_from"]
             for task in tasks
             if "ansible.builtin.import_role" in task
+            and "tasks_from" in task["ansible.builtin.import_role"]
         }
         assert actual == expected, name
 
