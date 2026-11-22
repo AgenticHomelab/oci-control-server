@@ -68,7 +68,7 @@ def test_omni_renewal_env_path_is_supplied_from_private_inputs():
     assert "hermes_omni_credential_file is defined" in task
     assert "{{ hermes_omni_credential_file }}" in task
     assert "{{ hermes_omni_credential_file }}" in service
-    assert "/home/hermes/.config/hermes/omni.env" not in service
+    assert "omni.env" not in service
 
 
 def test_native_dispatch_and_key_renewal_remain_opt_in():
