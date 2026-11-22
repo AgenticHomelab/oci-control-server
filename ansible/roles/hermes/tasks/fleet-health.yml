@@ -1,0 +1,51 @@
+---
+- name: Require explicit private Hermes operations source
+  ansible.builtin.assert:
+    that:
+      - hermes_private_operations_dir is defined
+      - hermes_private_operations_dir is match('^/')
+    fail_msg: Set hermes_private_operations_dir to the protected AgenticHomelab/homelab-secrets operations/hermes checkout.
+
+- name: Require the intended host and operator review before apply
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'control-01'
+      - ansible_check_mode or (hermes_fleet_health_reviewed | default(false) | bool)
+    fail_msg: Operator review of the exact behavior-changing source is required before apply.
+
+- name: Create native fleet skill directory
+  ansible.builtin.file:
+    path: /home/hermes/.hermes/skills/devops/fleet-health
+    state: directory
+    mode: "0750"
+
+- name: Install native fleet policy skill
+  ansible.builtin.copy:
+    src: "{{ hermes_private_operations_dir }}/fleet-health/SKILL.md"
+    dest: /home/hermes/.hermes/skills/devops/fleet-health/SKILL.md
+    mode: "0640"
+
+- name: Install reviewed operational policy without changing access
+  ansible.builtin.copy:
+    src: "{{ hermes_private_operations_dir }}/homelab-operations/SKILL.md"
+    dest: /home/hermes/.hermes/skills/devops/homelab-operations/SKILL.md
+    mode: "0640"
+
+- name: Create fleet prompt directory
+  ansible.builtin.file:
+    path: /home/hermes/.hermes/fleet-health
+    state: directory
+    mode: "0750"
+
+- name: Install source-controlled native job prompts
+  ansible.builtin.copy:
+    src: "{{ hermes_private_operations_dir }}/fleet-health/{{ item }}.md"
+    dest: "/home/hermes/.hermes/fleet-health/{{ item }}.md"
+    mode: "0640"
+  loop:
+    - talos-nightly-health
+    - talos-nightly-report
+    - opnsense-daily-security
+    - truenas-daily-health
+    - bazzite-daily-health
+    - infrastructure-weekly-report
