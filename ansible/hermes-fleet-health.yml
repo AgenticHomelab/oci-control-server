@@ -1,0 +1,12 @@
+---
+# File-only rollout. Native jobs are registered separately after operator review.
+- name: Install reviewed native fleet-health instructions
+  hosts: control
+  become: true
+  become_user: hermes
+  gather_facts: false
+  tasks:
+    - name: Install only fleet-health source instructions
+      ansible.builtin.import_role:
+        name: hermes
+        tasks_from: fleet-health
