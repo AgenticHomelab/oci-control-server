@@ -1,0 +1,20 @@
+---
+# Materialize an existing non-secret Vault selector; never fetch or store the password here.
+# The value must come from approved private operator inputs, not secret discovery.
+- name: Validate the existing Cloud Backup Vault selector
+  ansible.builtin.assert:
+    that:
+      - hermes_truenas_cloud_backup_secret_ocid is string
+      - hermes_truenas_cloud_backup_secret_ocid is match('^ocid1[.]vaultsecret[.][A-Za-z0-9.-]+$')
+    quiet: true
+    fail_msg: The existing Cloud Backup Secret OCID must be supplied from protected operator inputs.
+  no_log: true
+
+- name: Materialize the Cloud Backup Vault selector for Hermes
+  ansible.builtin.copy:
+    content: "{{ {'region': 'eu-stockholm-1', 'secret_id': hermes_truenas_cloud_backup_secret_ocid, 'stage': 'CURRENT'} | to_nice_json }}\n"
+    dest: /home/hermes/.config/truenas-opentofu/cloud-backup-vault.json
+    owner: hermes
+    group: hermes
+    mode: '0600'
+  no_log: true
