@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Hermes Omni service-account key expiry daily
+
+[Timer]
+OnCalendar=*-*-* 05:00:00 UTC
+RandomizedDelaySec=10m
+Persistent=true
+Unit=hermes-omni-key-renewal.service
+
+[Install]
+WantedBy=timers.target
