@@ -1,4 +1,4 @@
-# Exact paths in this history-free source export.
+# Exact tracked paths in this history-free public source.
 .ansible-lint
 .github/workflows/validate.yml
 .gitignore
@@ -9,6 +9,10 @@ ansible/grafana-backup.yml
 ansible/grafana-tailnet-dns.yml
 ansible/grafana-tailnet.yml
 ansible/group_vars/control.yml
+ansible/hermes-fleet-health.yml
+ansible/hermes-omni-key-renewal.yml
+ansible/hermes-operational-access.yml
+ansible/hermes-truenas-opentofu.yml
 ansible/inventory.ini.example
 ansible/loki.yml
 ansible/observability.yml
@@ -46,17 +50,27 @@ ansible/roles/hermes/files/gh
 ansible/roles/hermes/files/git
 ansible/roles/hermes/files/oci-hermes-api-credentials
 ansible/roles/hermes/files/oci-hermes-dashboard-credentials
+ansible/roles/hermes/files/talos-renovate-dispatch.service
+ansible/roles/hermes/files/talos-renovate-dispatch.timer
 ansible/roles/hermes/tasks/api-vault.yml
 ansible/roles/hermes/tasks/dashboard-credentials.yml
 ansible/roles/hermes/tasks/dashboard-vault.yml
+ansible/roles/hermes/tasks/fleet-health.yml
 ansible/roles/hermes/tasks/github-app-key.yml
 ansible/roles/hermes/tasks/github-app.yml
 ansible/roles/hermes/tasks/main.yml
+ansible/roles/hermes/tasks/omni-key-renewal.yml
+ansible/roles/hermes/tasks/operational-access.yml
+ansible/roles/hermes/tasks/renovate-nightly-dispatch.yml
+ansible/roles/hermes/tasks/truenas-opentofu-selector.yml
+ansible/roles/hermes/tasks/truenas-opentofu.yml
 ansible/roles/hermes/templates/hermes-dashboard.env.j2
 ansible/roles/hermes/templates/hermes-dashboard.service.j2
 ansible/roles/hermes/templates/hermes-gateway.service.j2
 ansible/roles/hermes/templates/hermes-github-app-token.j2
 ansible/roles/hermes/templates/hermes-github-git-credential.j2
+ansible/roles/hermes/templates/hermes-omni-key-renewal.service.j2
+ansible/roles/hermes/templates/hermes-omni-key-renewal.timer.j2
 ansible/roles/hermes/templates/oci-hermes-github-app-key.j2
 ansible/roles/host/files/control-omni-etcd
 ansible/roles/host/files/control-omni-etcd.service
@@ -131,6 +145,8 @@ ansible/roles/talos_metrics_receiver/templates/receiver.conf.j2
 ansible/roles/toolchain/tasks/main.yml
 ansible/talos-logs-receiver.yml
 ansible/talos-metrics-receiver.yml
+ansible/talos-renovate-dispatch.yml
+docs/hermes-operations-source.md
 docs/oci-monitoring-alerts.md
 docs/private-publication-inputs.md
 omni/access-policy.example.yaml
@@ -155,5 +171,6 @@ terraform/retired_iam_users.tf
 terraform/variables.tf
 terraform/vault.tf
 terraform/versions.tf
+tests/test_hermes_operations_source.py
 tests/test_public_hermes_github_app.py
 tests/test_talos_metrics_receiver.py
