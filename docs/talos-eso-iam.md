@@ -6,10 +6,15 @@ policy. It does not deploy ESO or create/read Vault secret contents.
 
 ## Boundary
 
-- `talos_eso_enabled = false` by default: zero ESO IAM resources, null ESO output,
-  and unchanged existing plan-reader policy strings. When enabled, the existing
-  plan-reader adds only the exact `talos-eso-vault-reader` user/group/policy names
-  to its existing metadata inspection statements, not any new permission verbs.
+- `talos_eso_enabled = false` by default: zero ESO IAM resources and a null
+  ESO output. Enabling ESO never modifies the existing Hermes plan-reader
+  policy: `terraform/hermes_oci_plan.tf` keeps exactly its original metadata
+  inspection statements with no `talos-eso-vault-reader` names, no
+  `talos_eso_enabled` conditional, and no new permission verbs.
+- OpenTofu `plan`/`apply` for this module run **operator-only** on the
+  original desktop workspace with its existing initialized backend; ESO IAM
+  staging alone grants no execution authority. Hermes permanent OCI
+  permissions are unchanged by this module.
 - The dedicated user can use API signing keys only. Console/password login,
   Customer Secret Keys, auth tokens, OAuth, database and SMTP credentials are
   disabled. The dedicated group has only that user as a managed member.
@@ -52,9 +57,22 @@ operator email inputs (`hermes_truenas_s3_identity_domain_url` and
 `hermes_truenas_s3_iam_email`); no additional domain is created.
 
 Runtime IDs must be disjoint from the explicit bootstrap denylist **and** all
-configured `control_*_secret_ocid` credential IDs in `vault.tf`. A lifecycle
-precondition fails on overlap, missing public key, missing allowlist/denylist,
-or disabled control Vault. Null host credential IDs are omitted from the union.
+configured `control_*_secret_ocid` credential IDs in `vault.tf`, with exactly
+one operator-approved exception: the existing host Cloudflare Vault secret
+(`control_cloudflare_secret_ocid`) holds only the raw shared api-token, and
+`cert-manager/cloudflare-api-token`, `cloudflare-ddns/cloudflare-ddns-secret`
+and `external-dns/external-dns-cloudflare` hold exactly equal api-token
+bytevalues. Canonical reuse therefore permits ESO to read that one existing
+shared secret **after the operator independently validates byte-equality**
+against all three Kubernetes Secrets; it is excluded from the automatic
+bootstrap deny union, while every other control host credential ID in
+`vault.tf` remains automatically denied. The operator helper configures a raw
+`remoteRef` to the three targets and performs this equality check before
+choosing the existing Cloudflare secret ID from the private config inventory.
+This is an exact existing-shared-token exception, never a broad exemption.
+A lifecycle precondition fails on overlap, missing public key, missing
+allowlist/denylist, or disabled control Vault. Null host credential IDs are
+omitted from the union.
 Secret OCID inputs reject whitespace, wildcards, quotes and IAM policy syntax.
 The public-key check is a lexical PEM envelope/base64 check, not cryptographic
 RSA validation: the operator must independently verify its algorithm, strength,
