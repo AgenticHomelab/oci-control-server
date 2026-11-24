@@ -666,7 +666,7 @@ def oci_vault_list(cfg, op_profile, vault_ocid, compartment_ocid, name):
 
 
 def key_fingerprint(cfg, custody, key_path):
-    """Fingerprint via public key DER SHA-1 (the OCI API-key convention)."""
+    """Fingerprint via public key DER MD5 (the OCI API-key convention)."""
     import tempfile
     with tempfile.TemporaryDirectory(dir=str(custody)) as td:
         der_path = Path(td) / 'pub.der'
@@ -674,8 +674,9 @@ def key_fingerprint(cfg, custody, key_path):
                  '-pubout', '-outform', 'DER', '-out', str(der_path)],
                 operation='openssl rsa')
         der = der_path.read_bytes()
-    digest = hashlib.sha1(der).hexdigest()
-    return ':'.join(digest[i:i + 2] for i in range(0, 40, 2))
+    # MD5 is the OCI key identifier, not a signature or security check.
+    digest = hashlib.md5(der, usedforsecurity=False).hexdigest()
+    return ':'.join(digest[i:i + 2] for i in range(0, len(digest), 2))
 
 
 # -- Kubernetes reads -------------------------------------------------
