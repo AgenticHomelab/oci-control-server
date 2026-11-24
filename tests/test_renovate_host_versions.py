@@ -2,6 +2,9 @@
 
 import json
 import re
+import subprocess
+
+import yaml
 from pathlib import Path
 
 
@@ -52,3 +55,24 @@ def test_opentofu_registry_is_not_silently_switched():
         and rule.get("registryUrls") == ["https://registry.opentofu.org"]
         for rule in config["packageRules"]
     )
+
+def test_control_inventory_receives_reviewed_pins():
+    expected = yaml.safe_load(
+        (ROOT / "ansible/group_vars/all/versions.yml").read_text()
+    )
+    # Check actual host_group_vars loading without contacting control-01.
+    result = subprocess.run(
+        [
+            "ansible-inventory", "-i", "inventory.ini.example",
+            "--playbook-dir", ".", "--host", "control-01",
+        ],
+        cwd=ROOT / "ansible",
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    host = json.loads(result.stdout)
+    assert len(expected) == len(EXPECTED)
+    for variable, value in expected.items():
+        assert host[variable] == value
