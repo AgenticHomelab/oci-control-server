@@ -278,11 +278,20 @@ class Fixture:
             if vcmd == "vault-get":
                 out({"data": {"id": "%(vault)s"}})
             if vcmd == "secret" and "list" in args:
-                name = args[args.index("--name")+1]
-                if name in live["vault_created"]:
-                    out({"data": [{"id": "ocid1.vaultsecret.eu-stockholm-1."
-                                         "v-" + name, "secret-name": name}]})
-                out({"data": []})
+                if live.get("list_error"):
+                    sys.stderr.write("ServiceError:\\n" + json.dumps({
+                        "code": live["list_error"], "message": "DO-NOT-PRINT"}))
+                    sys.exit(1)
+                name = args[args.index("--name")+1] if "--name" in args else None
+                rows = [{"id": "ocid1.vaultsecret.eu-stockholm-1.v-" + n,
+                         "secret-name": n,
+                         "lifecycle-state": live.get("vault_states", {}).get(n, "ACTIVE")}
+                        for n in live["vault_created"] if name in (None, n)]
+                if name is None:
+                    rows.append({"id": "%(shared)s",
+                                 "secret-name": "%(shared_name)s",
+                                 "lifecycle-state": "ACTIVE"})
+                out({"data": rows})
             if vcmd == "secret" and "get" in args and "--secret-id" in args:
                 sid = args[args.index("--secret-id")+1]
                 if sid == "%(shared)s":
@@ -308,8 +317,14 @@ class Fixture:
                                   "content-type": "BASE64",
                                   "content": content}}})
             if vcmd == "secret" and "create-base64" in args:
-                f = args[args.index("--secret-content-content-file")+1]
-                content = Path(f).read_text()
+                assert "--secret-content-content-file" not in args
+                assert "--secret-content-content" not in args
+                uri = args[args.index("--from-json")+1]
+                assert uri.startswith("file://")
+                f = Path(uri[len("file://"):])
+                assert f.stat().st_mode & 0o077 == 0
+                content = json.loads(f.read_text())["secretContentContent"]
+                assert args[args.index("--wait-for-state")+1] == "ACTIVE"
                 name = args[args.index("--secret-name")+1]
                 if name in live["vault_created"]:
                     sys.exit(1)  # create exactly once
@@ -689,6 +704,34 @@ def test_prepare_accepts_vault_in_root_compartment(fx):
     assert result.returncode == 0, result.stdout
     assert any('tenancy' in args and 'get' in args
                for args in fx.calls_of('oci'))
+
+
+def test_vault_status_reports_partial_import_without_bundle_reads(fx):
+    cfg = fx.make_config()
+    name = RUNTIME[0]['name']
+    fx.live_set(vault_created={name: b64(b'NOT-FOR-OUTPUT')},
+                vault_states={name: 'CREATING'})
+    result = fx.run('vault-status', cfg)
+    assert result.returncode == 0, result.stdout
+    status = json.loads(result.stdout)
+    assert status['runtime']['found'] == 1
+    assert status['runtime']['states'] == {'CREATING': 1}
+    assert status['bootstrap']['found'] == 0
+    assert 'NOT-FOR-OUTPUT' not in result.stdout
+    assert name not in result.stdout
+    assert not any('secret-bundle' in args or 'create-base64' in args
+                   for args in fx.calls_of('oci'))
+    assert fx.calls_of('kubectl') == []
+
+
+def test_prepare_native_failure_reports_only_safe_operation(fx):
+    cfg = fx.make_config()
+    fx.live_set(list_error='NotAuthorizedOrNotFound')
+    result = fx.run('prepare', cfg)
+    assert result.returncode != 0
+    assert 'oci vault secret list; exit 1; OCI code NotAuthorizedOrNotFound' in result.stdout
+    assert 'DO-NOT-PRINT' not in result.stdout
+    assert 'DO-NOT-PRINT' not in result.stderr
 
 
 def test_prepare_idempotent_no_rotation_single_create(fx):
