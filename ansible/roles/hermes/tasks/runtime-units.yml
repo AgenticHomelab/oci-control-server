@@ -59,6 +59,7 @@
         'restarted'
         if (hermes_dashboard_env.changed | default(false))
         or (hermes_dashboard_vault_refresh.changed | default(false))
+        or (hermes_update_completed | default(false) | bool)
         or hermes_dashboard_unit.changed
         else 'started'
       }}
