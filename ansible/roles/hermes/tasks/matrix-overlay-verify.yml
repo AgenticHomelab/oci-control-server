@@ -33,6 +33,25 @@
   changed_when: false
   check_mode: false
 
+- name: Identify exact reviewed Matrix adapter revision
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - hash-object
+      - plugins/platforms/matrix/adapter.py
+  register: hermes_matrix_adapter_blob
+  changed_when: false
+  check_mode: false
+
+- name: Require the approved patched Matrix adapter
+  ansible.builtin.assert:
+    that:
+      - hermes_matrix_adapter_blob.stdout == '6fa778e1cfbf584f950b627be633a08fbd10a841'
+    fail_msg: The installed Matrix adapter differs from the reviewed v0.23.4 patch.
+
 - name: Identify the reviewed Matrix delivery code and tests
   become_user: hermes
   ansible.builtin.command:
