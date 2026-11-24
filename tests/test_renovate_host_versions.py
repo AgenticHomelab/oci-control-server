@@ -62,7 +62,7 @@ def test_hermes_uses_only_stable_release_tags():
     values = yaml.safe_load(
         (ROOT / "ansible/group_vars/all/versions.yml").read_text()
     )
-    assert re.fullmatch(r"v[0-9]+\\.[0-9]+\\.[0-9]+", values["hermes_release_version"])
+    assert re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", values["hermes_release_version"])
     assert "hermes_install_commit:" not in (
         ROOT / "ansible/group_vars/control.yml"
     ).read_text()
