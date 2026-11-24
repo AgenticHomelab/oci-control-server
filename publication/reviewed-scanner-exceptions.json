@@ -317,19 +317,19 @@
         {
           "tool": "detect-secrets",
           "rule": "Private Key",
-          "line": 206
+          "line": 202
         },
         {
           "tool": "detect-secrets",
           "rule": "Private Key",
-          "line": 207
+          "line": 203
         }
       ],
       "git_blob_prefix_segments": [
-        "d2de",
-        "b484",
-        "a17f",
-        "19fb"
+        "a261",
+        "5bac",
+        "ea58",
+        "9cc4"
       ]
     },
     "tests/test_talos_secrets_bootstrap.py": {
@@ -449,10 +449,10 @@
       "reason": "Command/selector names in operator documentation; no credential values",
       "findings": [],
       "git_blob_prefix_segments": [
-        "7468",
-        "00c7",
-        "b5b3",
-        "f6e8"
+        "30d4",
+        "76d0",
+        "191e",
+        "012b"
       ]
     }
   }

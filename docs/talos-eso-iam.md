@@ -1,6 +1,6 @@
-# Talos ESO IAM metadata (opt-in; not deployed)
+# Talos ESO IAM metadata (deployed; explicit opt-in)
 
-`terraform/talos_eso.tf` stages a dedicated Identity Domains user, group,
+`terraform/talos_eso.tf` manages a dedicated Identity Domains user, group,
 operator-supplied API signing **public** key registration, and a compartment IAM
 policy. It does not deploy ESO or create/read Vault secret contents.
 
@@ -35,12 +35,14 @@ policy. It does not deploy ESO or create/read Vault secret contents.
   The public PEM, its fingerprint, identity OCIDs and allowlisted secret OCIDs
   are metadata and may appear in state. Keep private material independently.
 
-## Operator requirements before any authorized deployment
+## Operator requirements for future authorized IAM changes
 
-Implementation is not deployment approval. IAM changes and credential creation
-still require separate approval. No key, identity, policy, or secret was created
-by source validation. Do not initialize a backend, plan, apply, read protected
-state or credentials, or widen privileges to test this staged implementation.
+The operator deployed the four IAM resources on 2026-11-24. The 28 exact
+runtime bundle reads, one Vault validation and negative bootstrap/unrelated
+bundle tests passed; all 32 Kubernetes targets later synchronized without
+rotation. Keep the protected effective tfvars and existing backend. Future
+IAM changes and credential creation still require separate approval. Do not
+initialize a backend, plan, apply or read protected state to test source changes.
 
 Enabling requires all of the following non-secret metadata:
 
@@ -56,20 +58,13 @@ managed control Vault. Reuse the existing Identity Domains endpoint and
 operator email inputs (`hermes_truenas_s3_identity_domain_url` and
 `hermes_truenas_s3_iam_email`); no additional domain is created.
 
-Runtime IDs must be disjoint from the explicit bootstrap denylist **and** all
-configured `control_*_secret_ocid` credential IDs in `vault.tf`, with exactly
-one operator-approved exception: the existing host Cloudflare Vault secret
-(`control_cloudflare_secret_ocid`) holds only the raw shared api-token, and
-`cert-manager/cloudflare-api-token`, `cloudflare-ddns/cloudflare-ddns-secret`
-and `external-dns/external-dns-cloudflare` hold exactly equal api-token
-bytevalues. Canonical reuse therefore permits ESO to read that one existing
-shared secret **after the operator independently validates byte-equality**
-against all three Kubernetes Secrets; it is excluded from the automatic
-bootstrap deny union, while every other control host credential ID in
-`vault.tf` remains automatically denied. The operator helper configures a raw
-`remoteRef` to the three targets and performs this equality check before
-choosing the existing Cloudflare secret ID from the private config inventory.
-This is an exact existing-shared-token exception, never a broad exemption.
+Runtime IDs must be disjoint from the explicit bootstrap denylist and every
+configured `control_*_secret_ocid` credential ID in `vault.tf`. The original
+host Cloudflare reuse proposal was rejected during the live byte-equality
+check. The three Kubernetes Cloudflare consumers share their own JSON-map
+Vault bundle; `control_cloudflare_secret_ocid` remains outside the runtime
+allowlist. The final source guard denies the host token too; the deployed
+allowlist already excluded it. This is not permission to change IAM.
 A lifecycle precondition fails on overlap, missing public key, missing
 allowlist/denylist, or disabled control Vault. Null host credential IDs are
 omitted from the union.
@@ -136,4 +131,4 @@ verify every existing bootstrap credential variable is denied, and check that
 disabled metadata-policy templates retain their original strings. These are
 source contracts plus native schema validation, **not** a Terraform plan-time
 precondition execution, IAM evaluation, live credential validation or proof of
-successful ESO reconciliation. Those remain untested under this task's gates.
+successful ESO reconciliation. Live acceptance is recorded in AgenticHomelab/talos-cluster#15; offline tests do not replace it.
