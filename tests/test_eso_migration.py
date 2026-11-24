@@ -737,7 +737,15 @@ def test_prepare_native_failure_reports_only_safe_operation(fx):
 def test_prepare_idempotent_no_rotation_single_create(fx):
     cfg = fx.make_config()
     assert fx.run('prepare', cfg).returncode == 0
-    key_before = (Path(fx.custody) / 'eso-signing.pem').read_bytes()
+    key_path = Path(fx.custody) / 'eso-signing.pem'
+    key_before = key_path.read_bytes()
+    der = subprocess.check_output(
+        ['openssl', 'rsa', '-in', str(key_path), '-pubout', '-outform', 'DER'],
+        stderr=subprocess.DEVNULL)
+    fingerprint = subprocess.check_output(
+        ['openssl', 'md5', '-c'], input=der).decode().strip().split()[-1]
+    journal = json.loads((Path(fx.custody) / 'journal.json').read_text())
+    assert journal['api_key_fingerprint'] == fingerprint
     live_before = json.loads((fx.tmp / 'oci-live.json').read_text())
     result = fx.run('prepare', cfg)
     assert result.returncode == 0, result.stdout
