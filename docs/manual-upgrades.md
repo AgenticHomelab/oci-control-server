@@ -10,6 +10,7 @@ No second runner, automatic deployment, or unattended container updater exists.
 `renovate.json` creates review-only PRs with a Dependency Dashboard. It watches:
 
 - Omni and Dex image tags in `ansible/group_vars/all/versions.yml`;
+- stable Hermes Agent releases in that file, without prerelease/canary tracking;
 - kubectl, talosctl, Flux CLI and Helm version pins in that file;
   Renovate names these as host CLI updates (`kubectl`, `talosctl`,
   `flux-cli`, `helm-cli`), while upstream release lookups retain their real
@@ -22,7 +23,7 @@ No second runner, automatic deployment, or unattended container updater exists.
 The `# renovate:` comments next to selected Ansible pins explicitly opt them in.
 Other pins are intentionally excluded: Grafana's build and SHA256, Alloy's APT
 version, Loki and VictoriaMetrics archives/checksums, OCI CLI, the OpenTofu
-tool binary/checksum, Hermes's installed commit and Node/npm, and Vault
+tool binary/checksum, Hermes's Node/npm runtime details, and Vault
 credential version numbers. Do not add those to Renovate until their
 coupled metadata and safe upgrade procedures can be updated and validated.
 
@@ -121,10 +122,51 @@ their archive checksums; Loki has `ansible/loki.yml` and an additional
 version-specific assertion in `ansible/roles/loki/tasks/main.yml`.
 These are not covered by the initial Renovate custom manager.
 
-Hermes uses an installed **exact commit**; the normal host role explicitly
-refuses a mismatched commit and does not perform upgrades. Follow a separately
-reviewed upstream-supported Hermes upgrade procedure, not a Renovate edit to
-`hermes_install_commit`.
+### Hermes Agent
+
+Renovate follows only upstream stable `vX.Y.Z` releases through
+`hermes_release_version`. The normal Hermes role does not upgrade the
+installation. It checks that the installed checkout is at the exact commit
+of the reviewed local release tag. An upgrade PR **must not be merged
+ahead of the corresponding reviewed deployment** if routine host applies
+must remain valid in the interim.
+
+The first transition from the existing October 2026 Git commit to the
+November stable release is a larger application upgrade, not a simple
+binary replacement. The native updater can migrate app state and may
+restart the user services. Confirm a recoverable, independent copy of
+Hermes state and private operational assets, available capacity for the
+upstream `--backup` archive, and a maintenance window before attempting it.
+Avoid running the generic `playbook.yml` as part of this upgrade.
+
+Run the isolated play from the approved controller with the existing
+protected inventory and overlays:
+
+```sh
+ansible-playbook -i <approved-inventory> hermes-update.yml --check --diff
+# After review, from the approved checkout with operator authorization:
+ansible-playbook -i <approved-inventory> hermes-update.yml -e hermes_update_reviewed=true
+```
+
+The isolated play verifies an official clean checkout, a stable release tag,
+the currently latest upstream stable release, and the resolved exact tag
+commit before invoking `hermes update --channel stable --yes --backup`.
+The upstream updater owns dependency changes, backup and gateway restart.
+Ansible verifies the expected Git commit and checks gateway/dashboard
+systemd units afterward. Do not separately run `hermes update` from an
+unreviewed automation job; doing so bypasses the reviewed Git release pin.
+
+If upstream publishes another stable release between the preflight and the
+native update, the updater might select it. Post-verification rejects an
+unexpected commit, but cannot undo changes already made. Repeat the
+preflight immediately before the change; abort on new upstream releases.
+Do not assume Git rollback reverses data migrations.
+
+Verify dashboard login, gateway messaging, approved native scheduled jobs,
+GitHub App use, operational permissions, and relevant backup/recovery paths
+afterward. Systemd `active` alone does not establish functional acceptance.
+Record actual runtime revision and outcomes before merging the matching
+release PR.
 
 Ubuntu security updates and third-party APT packages use the host's existing
 APT policy. Renovate does not replace unattended-upgrades or provide assurance
