@@ -30,7 +30,7 @@ def test_only_supported_host_pins_are_extracted():
     # Python spells named groups differently than Renovate's JS/RE2 syntax.
     expression = config["customManagers"][0]["matchStrings"][0]
     expression = expression.replace("(?<", "(?P<")
-    group_vars = (ROOT / "ansible/group_vars/control.yml").read_text()
+    group_vars = (ROOT / "ansible/group_vars/all/versions.yml").read_text()
     matches = list(re.finditer(expression, group_vars))
     actual = {}
     for match in matches:
