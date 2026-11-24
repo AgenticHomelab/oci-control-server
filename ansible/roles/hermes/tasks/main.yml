@@ -69,7 +69,7 @@
   become_user: hermes
   ansible.builtin.shell: |
     set -o pipefail
-    curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/{{ hermes_release_version }}/scripts/install.sh \\
+    curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/{{ hermes_release_version }}/scripts/install.sh \
       | bash -s -- --non-interactive --skip-browser --channel stable
   args:
     executable: /bin/bash
