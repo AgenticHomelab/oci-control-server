@@ -398,10 +398,10 @@
         }
       ],
       "git_blob_prefix_segments": [
-        "5fd5",
-        "af3a",
-        "8a4b",
-        "3262"
+        "bdb5",
+        "1f10",
+        "58ad",
+        "05aa"
       ]
     },
     "scripts/eso-migration/eso_migrate.py": {
