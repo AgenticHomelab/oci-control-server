@@ -133,7 +133,17 @@ must remain valid in the interim.
 
 The first transition from the existing October 2026 Git commit to the
 November stable release is a larger application upgrade, not a simple
-binary replacement. The native updater can migrate app state and may
+binary replacement. The initial operator-run native update completed
+successfully to intermediate **v0.22.0** (commit
+`e06df9c2eae6901f4c88f464e0ae6e753c0428b8`) and the playbook
+correctly stopped before unit reconciliation because the approved target
+is **v0.23.4**. The original updater used Hermes's separate source-channel
+service; v0.22.0's stable target resolver now reports the GitHub
+v0.23.4 release. The initial channel's historical response is not
+available to verify independently. Preserve the retained Git stash and
+local backup; do not reset the checkout or retry the live upgrade until
+the intermediate revision and Matrix adapter code match the exact
+preflight identities and the user approves recovery. The native updater can migrate app state and may
 restart the user services. Confirm a recoverable, independent copy of
 Hermes state and private operational assets, available capacity for the
 upstream `--backup` archive, and a maintenance window before attempting it.
