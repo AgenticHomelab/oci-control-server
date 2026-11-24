@@ -374,22 +374,22 @@
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 755
+          "line": 763
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 901
+          "line": 909
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 918
+          "line": 926
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 988
+          "line": 996
         },
         {
           "tool": "gitleaks",
@@ -398,10 +398,10 @@
         }
       ],
       "git_blob_prefix_segments": [
-        "a6b3",
-        "b564",
-        "ce27",
-        "dcf5"
+        "5fd5",
+        "af3a",
+        "8a4b",
+        "3262"
       ]
     },
     "scripts/eso-migration/eso_migrate.py": {
@@ -415,12 +415,12 @@
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 1160
+          "line": 1161
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 1161
+          "line": 1162
         },
         {
           "tool": "gitleaks",
@@ -429,10 +429,10 @@
         }
       ],
       "git_blob_prefix_segments": [
-        "343c",
-        "4a84",
-        "22c1",
-        "7bb4"
+        "3fe1",
+        "71c6",
+        "dfae",
+        "d2ef"
       ]
     },
     "ansible/roles/talos_secrets_bootstrap/files/bootstrap.py": {
