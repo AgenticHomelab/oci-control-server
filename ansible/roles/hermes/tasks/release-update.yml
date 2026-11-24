@@ -178,6 +178,10 @@
   ansible.builtin.import_tasks: release-verify.yml
   when: not ansible_check_mode
 
+- name: Reconcile Hermes systemd units with the updated runtime lock
+  ansible.builtin.import_tasks: runtime-units.yml
+  when: not ansible_check_mode
+
 - name: Read Hermes service user ID
   ansible.builtin.command:
     argv: [id, -u, hermes]
