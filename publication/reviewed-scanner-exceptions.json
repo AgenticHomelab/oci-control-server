@@ -8,34 +8,34 @@
         {
           "tool": "gitleaks",
           "rule": "generic-api-key",
-          "line": 37
+          "line": 41
         },
         {
           "tool": "gitleaks",
           "rule": "generic-api-key",
-          "line": 70
+          "line": 74
         },
         {
           "tool": "detect-secrets",
           "rule": "Hex High Entropy String",
-          "line": 9
+          "line": 13
         },
         {
           "tool": "detect-secrets",
           "rule": "Hex High Entropy String",
-          "line": 21
+          "line": 25
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 36
+          "line": 40
         }
       ],
       "git_blob_prefix_segments": [
-        "103d",
-        "adf4",
-        "d590",
-        "9f2a"
+        "b832",
+        "0786",
+        "767c",
+        "5778"
       ]
     },
     "ansible/roles/edge/defaults/main.yml": {
