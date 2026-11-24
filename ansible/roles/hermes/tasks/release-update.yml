@@ -163,7 +163,8 @@
     HERMES_HOME: /home/hermes/.hermes
   ansible.builtin.command:
     argv:
-      - /home/hermes/.hermes/hermes-agent/.hermes/bin/python
+      - python3
+      - -B
       - -c
       - >-
         from hermes_cli.source_releases import resolve_source_target;
