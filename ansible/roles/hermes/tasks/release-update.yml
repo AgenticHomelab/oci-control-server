@@ -1,0 +1,203 @@
+---
+# Ansible selects the reviewed release and verifies the outcome.
+# Hermes owns its source migration, dependency updates, backups and restarts.
+- name: Require the intended host and stable release pin
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'control-01'
+      - hermes_release_version is match('^v[0-9]+\\.[0-9]+\\.[0-9]+$')
+    fail_msg: Only a reviewed vX.Y.Z Hermes release on control-01 is supported.
+
+- name: Read Hermes installation source
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - remote
+      - get-url
+      - origin
+  register: hermes_source_remote
+  changed_when: false
+  check_mode: false
+
+- name: Refuse unreviewed Hermes source repositories
+  ansible.builtin.assert:
+    that:
+      - hermes_source_remote.stdout | trim in
+        ['https://github.com/NousResearch/hermes-agent.git',
+         'https://github.com/NousResearch/hermes-agent']
+    fail_msg: Verify the existing Hermes checkout origin before upgrading.
+
+- name: Check Hermes working tree
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - status
+      - --porcelain
+  register: hermes_checkout_status
+  changed_when: false
+  check_mode: false
+
+- name: Require a clean Hermes source checkout
+  ansible.builtin.assert:
+    that:
+      - hermes_checkout_status.stdout | trim == ''
+    fail_msg: Review local Hermes checkout changes before any upgrade.
+
+- name: Read current Hermes checkout revision
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - rev-parse
+      - HEAD
+  register: hermes_before_sha
+  changed_when: false
+  check_mode: false
+
+- name: Look up the latest published stable Hermes release
+  ansible.builtin.uri:
+    url: https://api.github.com/repos/NousResearch/hermes-agent/releases/latest
+    return_content: true
+  register: hermes_latest_release
+  changed_when: false
+  check_mode: false
+
+- name: Require the reviewed release to match upstream stable
+  ansible.builtin.assert:
+    that:
+      - hermes_latest_release.json.tag_name == hermes_release_version
+      - not hermes_latest_release.json.prerelease | bool
+      - not hermes_latest_release.json.draft | bool
+    fail_msg: >-
+      A different stable Hermes release is now available. Review the
+      update, adjust the pinned version through a PR, and retry.
+
+- name: Resolve the reviewed tag to its exact upstream commit
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - ls-remote
+      - --tags
+      - https://github.com/NousResearch/hermes-agent.git
+      - "refs/tags/{{ hermes_release_version }}"
+      - "refs/tags/{{ hermes_release_version }}^{}"
+  register: hermes_upstream_tag_refs
+  changed_when: false
+  check_mode: false
+
+- name: Pick the peeled commit for an annotated release tag
+  ansible.builtin.set_fact:
+    hermes_release_ref_lines: >-
+      {{
+        hermes_upstream_tag_refs.stdout_lines |
+        select('search', 'refs/tags/' ~ (hermes_release_version | regex_escape) ~ '\\^\\{\\}$') |
+        list
+      }}
+
+- name: Resolve the expected release SHA
+  ansible.builtin.set_fact:
+    hermes_release_ref_line: >-
+      {{
+        (hermes_release_ref_lines | first | default('')) or
+        (hermes_upstream_tag_refs.stdout_lines |
+         select('search', 'refs/tags/' ~ (hermes_release_version | regex_escape) ~ '$') |
+         first | default(''))
+      }}
+
+- name: Extract the expected Git commit
+  ansible.builtin.set_fact:
+    hermes_expected_sha: "{{ hermes_release_ref_line.split()[0] | default('') }}"
+
+- name: Require an exact upstream release commit
+  ansible.builtin.assert:
+    that:
+      - hermes_expected_sha is match('^[0-9a-f]{40}$')
+    fail_msg: Could not resolve the reviewed Hermes release tag to a commit.
+
+- name: Inspect the native Hermes update plan
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+    HERMES_HOME: /home/hermes/.hermes
+  ansible.builtin.command:
+    argv:
+      - /home/hermes/.local/bin/hermes
+      - update
+      - --plan
+  register: hermes_native_update_plan
+  changed_when: false
+  check_mode: false
+
+- name: Summarize the proposed Hermes transition
+  ansible.builtin.debug:
+    msg: >-
+      Hermes {{ hermes_before_sha.stdout | trim }} to
+      {{ hermes_release_version }} ({{ hermes_expected_sha }}).
+      In check mode this is a preview only. Review the native plan,
+      independent recovery and a recent protected backup before apply.
+
+- name: Require explicit approval for a live Hermes version change
+  ansible.builtin.assert:
+    that:
+      - hermes_update_reviewed | default(false) | bool
+    fail_msg: Set hermes_update_reviewed=true only for the approved production upgrade.
+  when:
+    - not ansible_check_mode
+    - hermes_before_sha.stdout | trim != hermes_expected_sha
+
+- name: Run Hermes upstream stable updater with its own full pre-update backup
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+    HERMES_HOME: /home/hermes/.hermes
+  ansible.builtin.command:
+    argv:
+      - /home/hermes/.local/bin/hermes
+      - update
+      - --channel
+      - stable
+      - --yes
+      - --backup
+  async: 3600
+  poll: 15
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - hermes_before_sha.stdout | trim != hermes_expected_sha
+
+- name: Verify installed Hermes after the native update
+  ansible.builtin.import_tasks: release-verify.yml
+  when: not ansible_check_mode
+
+- name: Read Hermes service user ID
+  ansible.builtin.command:
+    argv: [id, -u, hermes]
+  register: hermes_upgrade_uid
+  changed_when: false
+  check_mode: false
+
+- name: Require Hermes gateway and dashboard services active
+  become_user: hermes
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_upgrade_uid.stdout | trim }}"
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - is-active
+      - "{{ item }}"
+  loop:
+    - hermes-gateway.service
+    - hermes-dashboard.service
+  register: hermes_update_service_status
+  changed_when: false
+  check_mode: false
