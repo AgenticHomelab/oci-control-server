@@ -81,7 +81,7 @@ def operator_profile(inputs):
         config = configparser.ConfigParser(interpolation=None)
         with open(inputs['config_file'], encoding='utf-8') as stream:
             config.read_file(stream)
-        require(inputs['profile'] in config.sections(), 'operator profile unavailable')
+        require(inputs['profile'] in config, 'operator profile unavailable')
         profile = config[inputs['profile']]
         require(profile.get('user') == inputs['operator_user_ocid']
                 and profile.get('user') != inputs['eso_user_ocid'],

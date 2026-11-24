@@ -43,8 +43,10 @@ python3 scripts/eso-migration/eso_migrate.py bootstrap --config /protected/migra
   backend block with `use_lockfile = true` (the bucket/key/region selectors
   live in the existing initialized backend configuration, never touched here)),
   verifies the independent operator OCI **API-key** profile (matching root
-  tenancy/compartment; `InstancePrincipal` and security-token profiles
-  are refused (the existing `DEFAULT` profile is acceptable)) by an actual `iam user get`/`iam compartment get`,
+  tenancy; `InstancePrincipal` and security-token profiles are refused,
+  while the existing `DEFAULT` profile is acceptable) with `iam user get`.
+  Validates the separate Vault resource compartment with `iam compartment get`
+  or `iam tenancy get` when the Vault is in the root compartment,
   then imports everything authorized into the **existing** Vault with
   create-once/reuse-equal semantics (equal existing content is reused,
   differing content fails closed — never overwrite, never rotate):

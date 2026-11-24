@@ -268,11 +268,13 @@ class Fixture:
                 if profile != "SYNTHETIC_OPERATOR" and profile != "ESO_IDENTITY":
                     sys.exit(1)
                 uid = args[args.index("--user-id")+1]
-                out({"data": {"id": uid, "tenancy-id": "%(tenancy)s",
-                             "compartment-id": "%(comp)s"}})
+                out({"data": {"id": uid, "compartment-id":
+                             live.get("user_root", "%(tenancy)s")}})
             if "iam" in args and "compartment" in args and "get" in args:
                 out({"data": {"id": "%(comp)s",
-                             "compartment-id": "%(comp)s"}})
+                             "compartment-id": "%(tenancy)s"}})
+            if "iam" in args and "tenancy" in args and "get" in args:
+                out({"data": {"id": "%(tenancy)s"}})
             if vcmd == "vault-get":
                 out({"data": {"id": "%(vault)s"}})
             if vcmd == "secret" and "list" in args:
@@ -664,6 +666,29 @@ def test_prepare_refuses_bad_operator_profile(fx):
     result = fx.run('prepare', cfg)
     assert result.returncode != 0
     assert fx.calls_of('oci') == [], 'no identity read before profile gate'
+
+
+def test_prepare_rejects_user_outside_expected_root_tenancy(fx):
+    fx.live_set(user_root='ocid1.tenancy.oc1..otherroot')
+    result = fx.run('prepare', fx.make_config())
+    assert result.returncode != 0
+    assert 'identity verification failed' in result.stdout
+    assert not any('vault' in args for args in fx.calls_of('oci'))
+
+
+def test_prepare_accepts_vault_in_root_compartment(fx):
+    cfg = fx.make_config()
+    config = json.loads(cfg.read_text())
+    config['expected']['compartment_ocid'] = TENANCY
+    protected(cfg, json.dumps(config))
+    inv = Path(config['inventory'])
+    inventory = json.loads(inv.read_text())
+    inventory['compartment_ocid'] = TENANCY
+    protected(inv, json.dumps(inventory))
+    result = fx.run('prepare', cfg)
+    assert result.returncode == 0, result.stdout
+    assert any('tenancy' in args and 'get' in args
+               for args in fx.calls_of('oci'))
 
 
 def test_prepare_idempotent_no_rotation_single_create(fx):

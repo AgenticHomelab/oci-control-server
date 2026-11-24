@@ -172,6 +172,16 @@ class BootstrapTests(unittest.TestCase):
             self.invoke(module)
         self.assertEqual(self.fake.calls, [])
 
+    def test_default_profile_is_supported(self):
+        module = self.load()
+        baseline = self.config.read_text()
+        self.config.write_text(baseline.replace('[RECOVERY]', '[DEFAULT]'))
+        self.inputs['profile'] = 'DEFAULT'
+        self.assertTrue(self.invoke(module)['changed'])
+        self.assertTrue(any('--profile' in argv
+                            and argv[argv.index('--profile') + 1] == 'DEFAULT'
+                            for argv, _ in self.fake.calls))
+
     def test_all_targets_preflighted_and_mismatches_never_rotate(self):
         module = self.load()
         self.invoke(module)
