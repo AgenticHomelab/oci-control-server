@@ -967,8 +967,10 @@ def mode_inventory(cfg, args=None):
     for target in targets:
         ocid = target.get('annotation_ocid')
         if ocid is not None:
-            # Fail closed on malformed annotation values: a typo'd OCID must
-            # stop inventory, not silently demote the target to a new import.
+            # Legacy Vault names describe provenance, not permission to reuse.
+            # Only an explicit OCID or operator hint authorizes existing reuse.
+            if not ocid.startswith('ocid1.') and VAULT_NAME.fullmatch(ocid):
+                continue
             require(ocid.startswith(VAULTSECRET) and OCID.match(ocid),
                     E_REUSE)
             entry = reuse.setdefault(ocid, {'ocid': ocid, 'targets': []})

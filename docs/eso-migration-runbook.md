@@ -30,8 +30,11 @@ python3 scripts/eso-migration/eso_migrate.py bootstrap --config /protected/migra
   memory (type, data keys, annotations). It writes a **draft**
   `inventory.json` (schema 2) into the custody dir with runtime targets
   (`k8s-<namespace>-<name>` vault names, K8s selectors, no OCIDs),
-  reuse entries derived from the `k0ti.com/oci-vault-secret` annotation
-  plus any operator `reuse_hints` from the config, byte-equal duplicate
+  reuse entries derived from explicit OCIDs in the `k0ti.com/oci-vault-secret`
+  annotation plus any operator `reuse_hints` from the config. Legacy Vault
+  names in that annotation are provenance only: absent an explicit reuse
+  hint, the target is imported separately (or deduplicated by bytes).
+  Malformed OCID annotations still fail closed. The draft includes byte-equal duplicate
   groups reported as selectors only (no values), and the Flux bundle
   contract with the Secret's real keys. Review the draft, then point the
   config's `inventory` at it (or merge it into your reviewed copy).
