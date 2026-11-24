@@ -218,14 +218,14 @@ def load_config(path):
     expected = cfg.get('expected') or {}
     require(all(isinstance(expected.get(k), str) and expected[k] for k in
                 ('tenancy_ocid', 'compartment_ocid', 'region', 'vault_ocid',
-                 'operator_user_ocid')), E_SCHEMA)
+                 'vault_key_ocid', 'operator_user_ocid')), E_SCHEMA)
     backend = expected.get('backend') or {}
     require(all(isinstance(backend.get(k), str) and backend[k] for k in
                 ('bucket', 'key', 'region')), E_SCHEMA)
     operator = cfg.get('operator') or {}
     require(isinstance(operator.get('config_file'), str)
             and isinstance(operator.get('profile'), str)
-            and operator['profile'] != 'DEFAULT', E_SCHEMA)
+            and operator['profile'], E_SCHEMA)
     tools = cfg.get('tools') or {}
     import shutil
     for name in ('git', 'tofu', 'oci', 'kubectl', 'openssl',
@@ -611,14 +611,16 @@ def public_pem(cfg, private_pem):
 def oci_vault_bundle_by_name(cfg, op_profile, vault_ocid, name):
     """GetSecretBundleByName through the given identity."""
     data = parse_native_json(oci(
-        cfg, op_profile, 'vault', 'secret-bundle', 'get-by-name',
+        cfg, op_profile, 'secrets', 'secret-bundle',
+        'get-secret-bundle-by-name',
         '--vault-id', vault_ocid, '--secret-name', name))
     return (data or {}).get('data') or {}
 
 
-def oci_vault_list(cfg, op_profile, vault_ocid, name):
+def oci_vault_list(cfg, op_profile, vault_ocid, compartment_ocid, name):
     data = parse_native_json(oci(
-        cfg, op_profile, 'vault', 'secrets', 'list', '--vault-id', vault_ocid,
+        cfg, op_profile, 'vault', 'secret', 'list',
+        '--vault-id', vault_ocid, '--compartment-id', compartment_ocid,
         '--name', name, '--all'))
     return (data or {}).get('data') or []
 
@@ -691,7 +693,8 @@ def vault_create_or_reuse_equal(cfg, op_profile, inv, name, payload_text,
     custody = custody_dir(cfg)
     vault = cfg['expected']['vault_ocid']
     content = base64.b64encode(payload_text.encode()).decode()
-    existing = oci_vault_list(cfg, op_profile, vault, name)
+    existing = oci_vault_list(cfg, op_profile, vault,
+                              inv['compartment_ocid'], name)
     if existing:
         bundle = oci_vault_bundle_by_name(cfg, op_profile, vault, name)
         stages = bundle.get('version-stages') or []
@@ -709,12 +712,12 @@ def vault_create_or_reuse_equal(cfg, op_profile, inv, name, payload_text,
         content_path.write_text(content)
         os.chmod(content_path, 0o600)
         created = parse_native_json(oci(
-            cfg, op_profile, 'vault', 'secret', 'create',
+            cfg, op_profile, 'vault', 'secret', 'create-base64',
             '--vault-id', vault, '--compartment-id', inv['compartment_ocid'],
+            '--key-id', cfg['expected']['vault_key_ocid'],
             '--secret-name', name,
             '--secret-content-content-file', str(content_path),
-            '--secret-content-content-type', 'BASE64', '--description',
-            description))
+            '--description', description))
     secret_ocid = ((created or {}).get('data') or {}).get('id')
     require(isinstance(secret_ocid, str) and OCID.match(secret_ocid),
             E_VAULT)
@@ -1186,7 +1189,8 @@ def mode_verify(cfg, args=None):
     # Positive: GetVault + by-name bundle read for every runtime target
     # AND every reuse entry (by resolved NAME; exact OCID, CURRENT stage).
     vault_data = parse_native_json(
-        oci(cfg, eso_profile, 'vault', 'vault', 'get', '--vault-id', vault))
+        oci(cfg, eso_profile, 'kms', 'management', 'vault', 'get',
+                '--vault-id', vault))
     require(((vault_data or {}).get('data') or {}).get('id') == vault,
             E_VERIFY)
     for target in journal['runtime_targets']:
@@ -1208,7 +1212,7 @@ def mode_verify(cfg, args=None):
                     + [journal['unrelated_sentinel_secret_ocid']])
     denial_codes = []
     for ocid_value in denied_ocids:
-        rc, _out, err = oci_raw(cfg, eso_profile, 'vault', 'secret-bundle',
+        rc, _out, err = oci_raw(cfg, eso_profile, 'secrets', 'secret-bundle',
                                 'get', '--secret-id', ocid_value)
         if rc == 0:
             raise Fail(E_DENIAL)
@@ -1218,7 +1222,7 @@ def mode_verify(cfg, args=None):
         raise Fail(E_VERIFY_API)
     # Positive control: the operator can still read one denied OCID by ID,
     # proving the sentinel is not simply a nonexistent secret.
-    oci_raw(cfg, op_profile, 'vault', 'secret-bundle', 'get',
+    oci_raw(cfg, op_profile, 'secrets', 'secret-bundle', 'get',
             '--secret-id', denied_ocids[0])
     emit({'ok': True, 'mode': 'verify',
           'runtime_verified': len(journal['runtime_targets']),

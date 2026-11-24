@@ -47,7 +47,7 @@ def validate(inputs):
     require(inputs['approved'] is True and inputs['auth'] == 'api_key',
             'explicit approval and API-key authentication required')
     require(matches(r'[A-Za-z0-9][A-Za-z0-9_.-]*', inputs['profile'])
-            and inputs['profile'] != 'DEFAULT', 'explicit named operator profile required')
+            and inputs['profile'], 'explicit operator profile required')
     require(matches(r'[a-z0-9][a-z0-9-]+', inputs['region']), 'explicit OCI region required')
     require(matches(r'[A-Za-z0-9][A-Za-z0-9_./:@-]*', inputs['context']),
             'explicit Kubernetes context required')

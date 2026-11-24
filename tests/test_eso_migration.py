@@ -25,6 +25,7 @@ GIT_ORIGIN_PATH = 'AgenticHomelab/oci-control-server.git'
 TENANCY = 'ocid1.tenancy.oc1..synthtenancy'
 COMPARTMENT = 'ocid1.compartment.oc1..synthcomp'
 VAULT = 'ocid1.vault.eu-stockholm-1.synthvault'
+VAULT_KEY = 'ocid1.key.eu-stockholm-1.synthvaultkey'
 REGION = 'eu-stockholm-1'
 OPERATOR_USER = 'ocid1.user.oc1..synthoperator'
 ESO_USER = 'ocid1.user.oc1..syntheticeso'
@@ -252,11 +253,19 @@ class Fixture:
                     {"code": code, "message": "synthetic"}))
                 sys.exit(1)
             profile = args[args.index("--profile")+1] if "--profile" in args else "?"
-            # The service group verb follows the first literal "vault".
+            # vcmd is the service path derived per real CLI structure,
+            # located past the global flags the real CLI also accepts.
             vcmd = ""
-            if "vault" in args:
-                vi = args.index("vault")
-                vcmd = args[vi+1] if vi + 1 < len(args) else ""
+            SERVICE = {"iam", "vault", "secrets", "kms"}
+            si = next((i for i, a in enumerate(args) if a in SERVICE), None)
+            if si is not None:
+                rest = args[si:]
+                if rest[:2] == ["secrets", "secret-bundle"]:
+                    vcmd = "secret-bundle"
+                elif rest[:2] == ["vault", "secret"]:
+                    vcmd = "secret"
+                elif rest[:4] == ["kms", "management", "vault", "get"]:
+                    vcmd = "vault-get"
             if "iam" in args and "user" in args and "get" in args:
                 if profile != "SYNTHETIC_OPERATOR" and profile != "ESO_IDENTITY":
                     sys.exit(1)
@@ -266,9 +275,9 @@ class Fixture:
             if "iam" in args and "compartment" in args and "get" in args:
                 out({"data": {"id": "%(comp)s",
                              "compartment-id": "%(comp)s"}})
-            if vcmd == "vault" and "get" in args:
+            if vcmd == "vault-get":
                 out({"data": {"id": "%(vault)s"}})
-            if vcmd == "secrets" and "list" in args:
+            if vcmd == "secret" and "list" in args:
                 name = args[args.index("--name")+1]
                 if name in live["vault_created"]:
                     out({"data": [{"id": "ocid1.vaultsecret.eu-stockholm-1."
@@ -281,7 +290,7 @@ class Fixture:
                                   "secret-name": "%(shared_name)s",
                                   "vault-id": "%(vault)s"}})
                 sys.exit(1)
-            if vcmd == "secret-bundle" and "get-by-name" in args:
+            if vcmd == "secret-bundle" and "get-secret-bundle-by-name" in args:
                 name = args[args.index("--secret-name")+1]
                 created = live["vault_created"]
                 if name in created:
@@ -298,7 +307,7 @@ class Fixture:
                               "secret-bundle-content": {
                                   "content-type": "BASE64",
                                   "content": content}}})
-            if vcmd == "secret" and "create" in args:
+            if vcmd == "secret" and "create-base64" in args:
                 f = args[args.index("--secret-content-content-file")+1]
                 content = Path(f).read_text()
                 name = args[args.index("--secret-name")+1]
@@ -426,6 +435,7 @@ class Fixture:
             'expected': {
                 'tenancy_ocid': TENANCY, 'compartment_ocid': COMPARTMENT,
                 'region': REGION, 'vault_ocid': VAULT,
+                'vault_key_ocid': VAULT_KEY,
                 'operator_user_ocid': OPERATOR_USER,
                 'backend': {'bucket': 'oci-control-server-state',
                             'key': 'control-server/terraform.tfstate',
@@ -851,7 +861,8 @@ def test_verify_positive_includes_reuse_entries(fx):
     assert status['reuse_verified'] == 1
     # by-name read for the reuse entry's resolved vault name happened.
     assert any(SHARED_VAULT_NAME in ' '.join(c)
-               for c in fx.calls_of('oci') if 'get-by-name' in c)
+               for c in fx.calls_of('oci')
+               if 'get-secret-bundle-by-name' in c)
 
 
 def test_verify_fails_when_denial_missing(fx):

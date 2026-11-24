@@ -291,24 +291,24 @@
       ]
     },
     "docs/talos-secrets-bootstrap.md": {
-      "reason": "Explicitly synthetic, non-deployable Vault secret OCID selectors in the bootstrap schema example, not credentials",
+      "reason": "Command/selector names in operator documentation; no credential values",
       "findings": [
         {
           "tool": "gitleaks",
           "rule": "generic-api-key",
-          "line": 76
+          "line": 77
         },
         {
           "tool": "gitleaks",
           "rule": "generic-api-key",
-          "line": 79
+          "line": 80
         }
       ],
       "git_blob_prefix_segments": [
-        "f4ab",
-        "5416",
-        "4212",
-        "0adb"
+        "ac47",
+        "4668",
+        "1cab",
+        "bad2"
       ]
     },
     "tests/test_talos_eso_iam.py": {
@@ -333,7 +333,7 @@
       ]
     },
     "tests/test_talos_secrets_bootstrap.py": {
-      "reason": "Named synthetic OCI-key fixture and synthetic unrelated environment sentinel used to test no credential forwarding; no real credential bytes",
+      "reason": "Synthetic fixtures: profile/key names and fake values; no real credentials",
       "findings": [
         {
           "tool": "detect-secrets",
@@ -347,10 +347,10 @@
         }
       ],
       "git_blob_prefix_segments": [
-        "f6dc",
-        "de5b",
-        "68fd",
-        "baab"
+        "1e07",
+        "7224",
+        "acdf",
+        "5c92"
       ]
     },
     "tests/test_eso_migration.py": {
@@ -359,44 +359,49 @@
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 52
+          "line": 53
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 165
+          "line": 166
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 168
+          "line": 169
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 677
+          "line": 687
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 823
+          "line": 833
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 840
+          "line": 850
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 909
+          "line": 920
+        },
+        {
+          "tool": "gitleaks",
+          "rule": "generic-api-key",
+          "line": 28
         }
       ],
       "git_blob_prefix_segments": [
-        "10a0",
-        "8539",
-        "d6cb",
-        "68db"
+        "f948",
+        "6afe",
+        "7313",
+        "a76b"
       ]
     },
     "scripts/eso-migration/eso_migrate.py": {
@@ -410,12 +415,12 @@
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 1054
+          "line": 1057
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 1055
+          "line": 1058
         },
         {
           "tool": "gitleaks",
@@ -424,10 +429,30 @@
         }
       ],
       "git_blob_prefix_segments": [
-        "0bee",
-        "0e43",
-        "9258",
-        "6e39"
+        "f798",
+        "60e6",
+        "048c",
+        "d638"
+      ]
+    },
+    "ansible/roles/talos_secrets_bootstrap/files/bootstrap.py": {
+      "reason": "Sanitized helper: profile/selector validation literals; no credential values",
+      "findings": [],
+      "git_blob_prefix_segments": [
+        "0e67",
+        "df97",
+        "dcd5",
+        "31da"
+      ]
+    },
+    "docs/eso-migration-runbook.md": {
+      "reason": "Command/selector names in operator documentation; no credential values",
+      "findings": [],
+      "git_blob_prefix_segments": [
+        "600b",
+        "0795",
+        "0196",
+        "2333"
       ]
     }
   }
