@@ -4,7 +4,7 @@
 # inventory currently has no other hosts. Keep these pins out of the
 # scanner-reviewed credential/metadata file group_vars/control.yml.
 # renovate: datasource=github-tags depName=kubernetes/kubernetes
-kubectl_version: "v1.37.1"
+kubectl_version: "v1.37.2"
 
 # renovate: datasource=github-releases depName=siderolabs/talos
 talosctl_version: "v1.13.5"
