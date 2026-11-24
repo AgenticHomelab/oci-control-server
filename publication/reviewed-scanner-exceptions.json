@@ -3,39 +3,39 @@
   "description": "Reviewed false positives only. Scanner output is never published. A source blob change invalidates every exception for that file.",
   "files": {
     "ansible/group_vars/control.yml": {
-      "reason": "Pinned software checksums and noncredential environment/Vault selectors",
+      "reason": "Pinned noncredential checksums and environment/Vault selectors; six plain software versions moved to group_vars/all/versions.yml",
       "findings": [
         {
           "tool": "gitleaks",
           "rule": "generic-api-key",
-          "line": 37
+          "line": 33
         },
         {
           "tool": "gitleaks",
           "rule": "generic-api-key",
-          "line": 70
+          "line": 66
         },
         {
           "tool": "detect-secrets",
           "rule": "Hex High Entropy String",
-          "line": 9
+          "line": 5
         },
         {
           "tool": "detect-secrets",
           "rule": "Hex High Entropy String",
-          "line": 21
+          "line": 17
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 36
+          "line": 32
         }
       ],
       "git_blob_prefix_segments": [
-        "103d",
-        "adf4",
-        "d590",
-        "9f2a"
+        "1f66",
+        "ff4b",
+        "2467",
+        "ca55"
       ]
     },
     "ansible/roles/edge/defaults/main.yml": {

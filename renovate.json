@@ -1,0 +1,64 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "timezone": "Europe/Helsinki",
+  "dependencyDashboard": true,
+  "automerge": false,
+  "platformAutomerge": false,
+  "enabledManagers": [
+    "github-actions",
+    "terraform",
+    "custom.regex"
+  ],
+  "prHourlyLimit": 2,
+  "prConcurrentLimit": 5,
+  "semanticCommits": "enabled",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "deps",
+  "addLabels": [
+    "dependencies"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^ansible\\/group_vars\\/all\\/versions\\.yml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\r?\\n(?<variable>[a-z][a-z0-9_]*):[ \\t]*\"(?<currentValue>[^\"]+)\""
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Look up OCI providers from the existing OpenTofu registry",
+      "matchDatasources": [
+        "terraform-provider",
+        "terraform-module"
+      ],
+      "registryUrls": [
+        "https://registry.opentofu.org"
+      ]
+    },
+    {
+      "description": "Keep plain version numbers for CLI URLs that add their own v prefix",
+      "matchPackageNames": [
+        "fluxcd/flux2",
+        "helm/helm"
+      ],
+      "extractVersion": "^v(?<version>[0-9]+\\.[0-9]+\\.[0-9]+.*)$"
+    },
+    {
+      "description": "Keep Terraform/OpenTofu CLI constraints under separate review",
+      "matchManagers": [
+        "terraform"
+      ],
+      "matchDepTypes": [
+        "required_version"
+      ],
+      "enabled": false
+    }
+  ]
+}

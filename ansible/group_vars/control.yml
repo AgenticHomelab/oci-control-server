@@ -1,8 +1,4 @@
 ---
-kubectl_version: "v1.37.1"
-talosctl_version: "v1.13.5"
-flux_version: "2.9.6"
-helm_version: "4.3.0"
 
 # Pinned official OpenTofu CLI for the isolated Hermes TrueNAS preparation play.
 truenas_opentofu_version: "1.12.6"
@@ -73,8 +69,6 @@ omni_auth_vault_version_number: 1
 omni_runtime_enabled: true
 omni_edge_enabled: true
 
-omni_version: "v1.12.3"
-omni_dex_version: "v2.41.1"
 
 omni_certificate_domains:
   - "{{ omni_hostname }}"
