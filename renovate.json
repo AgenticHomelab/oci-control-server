@@ -59,6 +59,46 @@
         "required_version"
       ],
       "enabled": false
+    },
+    {
+      "description": "Display only the control-01 kubectl CLI, not the upstream project lifecycle",
+      "matchFileNames": [
+        "ansible/group_vars/all/versions.yml"
+      ],
+      "matchPackageNames": [
+        "kubernetes/kubernetes"
+      ],
+      "overrideDepName": "kubectl"
+    },
+    {
+      "description": "Display only the control-01 talosctl CLI, not the upstream project lifecycle",
+      "matchFileNames": [
+        "ansible/group_vars/all/versions.yml"
+      ],
+      "matchPackageNames": [
+        "siderolabs/talos"
+      ],
+      "overrideDepName": "talosctl"
+    },
+    {
+      "description": "Display only the control-01 flux-cli CLI, not the upstream project lifecycle",
+      "matchFileNames": [
+        "ansible/group_vars/all/versions.yml"
+      ],
+      "matchPackageNames": [
+        "fluxcd/flux2"
+      ],
+      "overrideDepName": "flux-cli"
+    },
+    {
+      "description": "Display only the control-01 helm-cli CLI, not the upstream project lifecycle",
+      "matchFileNames": [
+        "ansible/group_vars/all/versions.yml"
+      ],
+      "matchPackageNames": [
+        "helm/helm"
+      ],
+      "overrideDepName": "helm-cli"
     }
   ]
 }
