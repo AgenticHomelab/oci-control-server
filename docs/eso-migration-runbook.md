@@ -64,7 +64,11 @@ python3 scripts/eso-migration/eso_migrate.py bootstrap --config /protected/migra
   or `iam tenancy get` when the Vault is in the root compartment,
   then imports everything authorized into the **existing** Vault with
   create-once/reuse-equal semantics (equal existing content is reused,
-  differing content fails closed — never overwrite, never rotate):
+  differing content fails closed — never overwrite, never rotate).
+  Readback explicitly selects CURRENT and checks the native `stages`,
+  secret ID, version number, BASE64 encoding and exact content separately.
+  A metadata error is reported separately from a value mismatch:
+
   every runtime target is read from Kubernetes (exact key set and type,
   live object, UTF-8 values; anything else fails sanitized), imported as a
   compact JSON map under its derived vault name — byte-equal targets share
@@ -81,11 +85,14 @@ python3 scripts/eso-migration/eso_migrate.py bootstrap --config /protected/migra
   `-refresh=false`, no `-lock=false`) with the custody tfvars, inspects the
   saved plan JSON and fails closed unless it contains exactly the four new
   `talos_eso` resources and nothing else, and prints a sanitized
-  address/action summary plus the saved-plan digest.
+  address/action summary plus the saved-plan digest. Unchanged resource
+  entries (`no-op`) are excluded from the mutation count; moves, imports,
+  and other unrelated changes still fail closed.
 - **apply** applies the exact saved plan bytes only after
   `--approve <digest>` matches, then records the wiring metadata
   (`eso_user_ocid`, fingerprint, K8s auth Secret selector) in the journal.
-  The registered public fingerprint is safe-compared with the custody key's
+  The named OpenTofu output is read as the value itself, not the
+  all-outputs metadata envelope. The registered public fingerprint is safe-compared with the custody key's
   fingerprint; mismatch fails closed.
 - **verify** performs the IAM validation as the new ESO identity (signed
   with the custody key through a generated, protected ephemeral config):
