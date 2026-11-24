@@ -166,7 +166,7 @@ def test_matrix_e2ee_source_overlay_is_reviewed_and_kept_out_of_normal_updates()
     def blob_sha(path):
         source = path.read_bytes()
         return hashlib.sha1(
-            b"blob " + str(len(source)).encode() + b"\\0" + source,
+            b"blob " + str(len(source)).encode() + b"\x00" + source,
             usedforsecurity=False,
         ).hexdigest()
 
