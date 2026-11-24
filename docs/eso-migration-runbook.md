@@ -38,6 +38,16 @@ python3 scripts/eso-migration/eso_migrate.py bootstrap --config /protected/migra
   groups reported as selectors only (no values), and the Flux bundle
   contract with the Secret's real keys. Review the draft, then point the
   config's `inventory` at it (or merge it into your reviewed copy).
+- **vault-status** is an optional read-only check before or after prepare.
+  It validates the operator identity and lists Vault metadata only. The
+  JSON reports expected/found counts and lifecycle states for runtime
+  candidate names, bootstrap names and reused OCIDs, without printing
+  names, identifiers or secret content. Runtime counts can be lower
+  than inventory counts because equal payloads share a representative.
+  Existing entries are not evidence of equality; prepare verifies content
+  in memory. Run with the same config:
+
+  `python3 scripts/eso-migration/eso_migrate.py vault-status --config /protected/migrate.json`
 - **prepare** verifies the original git source (exact origin, clean
   terraform tree, native `tofu workspace show` = default, `terraform/.terraform` initialized data directory (TF_DATA_DIR unset), original S3
   backend block with `use_lockfile = true` (the bucket/key/region selectors
@@ -148,9 +158,14 @@ parent's ExternalSecret generation consumes these shapes from the journal:
   by the operator; no `-auto-approve`.
 - Verify distinguishes real IAM authorization denials from any other API
   failure; only the former count, the latter fail the mode.
-- All native stdout/stderr is captured and discarded; operator output is
-  one sanitized JSON status line per invocation. Child environment is
-  stripped of `OCI_*` overrides.
+- Native stdout/stderr is captured; raw output is never replayed. Failures
+  report the fixed operation, exit status or timeout, and a recognized OCI
+  error code if available. Child environment is stripped of `OCI_*`
+  overrides. Vault create uses a mode-0600 JSON input file via
+  `--from-json file://...`, waits for ACTIVE and verifies the CURRENT
+  bundle against the input in memory. If a create times out, inspect
+  vault-status before retrying; do not delete partial entries or signing
+  key custody. Non-ACTIVE existing candidates fail closed.
 - Journal/source mismatch (source HEAD changed) fails closed in plan/apply/
   verify/bootstrap.
 - Idempotent reruns: no key rotation, no duplicate Vault create, single

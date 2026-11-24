@@ -374,22 +374,22 @@
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 712
+          "line": 763
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 858
+          "line": 909
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 875
+          "line": 926
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 945
+          "line": 996
         },
         {
           "tool": "gitleaks",
@@ -398,10 +398,10 @@
         }
       ],
       "git_blob_prefix_segments": [
-        "e62e",
-        "ca27",
-        "0585",
-        "3985"
+        "bdb5",
+        "1f10",
+        "58ad",
+        "05aa"
       ]
     },
     "scripts/eso-migration/eso_migrate.py": {
@@ -410,29 +410,29 @@
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 105
+          "line": 106
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 1091
+          "line": 1161
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 1092
+          "line": 1162
         },
         {
           "tool": "gitleaks",
           "rule": "generic-api-key",
-          "line": 105
+          "line": 106
         }
       ],
       "git_blob_prefix_segments": [
-        "98b5",
-        "cc89",
-        "e445",
-        "6391"
+        "3fe1",
+        "71c6",
+        "dfae",
+        "d2ef"
       ]
     },
     "ansible/roles/talos_secrets_bootstrap/files/bootstrap.py": {
@@ -449,10 +449,10 @@
       "reason": "Command/selector names in operator documentation; no credential values",
       "findings": [],
       "git_blob_prefix_segments": [
-        "1074",
-        "0163",
-        "4fc8",
-        "efe8"
+        "689e",
+        "b62b",
+        "1ec1",
+        "30e5"
       ]
     }
   }
