@@ -1,0 +1,95 @@
+---
+# Review/update this integration with EACH Hermes release. The patch is for
+# upstream v0.23.4 only; a different release must fail rather than guess.
+- name: Require the reviewed Matrix overlay compatibility target
+  ansible.builtin.assert:
+    that:
+      - hermes_release_version == 'v0.23.4'
+    fail_msg: Rebase and test the Matrix overlay before updating Hermes beyond v0.23.4.
+
+- name: Keep the reviewed Matrix patch separate from the upstream source
+  become_user: hermes
+  ansible.builtin.file:
+    path: /home/hermes/.hermes/matrix-overlay
+    state: directory
+    mode: "0700"
+
+- name: Install the reviewed Matrix adapter patch
+  become_user: hermes
+  ansible.builtin.copy:
+    src: matrix/adapter-v0.23.4.patch
+    dest: /home/hermes/.hermes/matrix-overlay/adapter-v0.23.4.patch
+    mode: "0600"
+
+- name: Check whether the reviewed Matrix adapter patch is already applied
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - apply
+      - --reverse
+      - --check
+      - /home/hermes/.hermes/matrix-overlay/adapter-v0.23.4.patch
+  register: hermes_matrix_patch_present
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Require a compatible upstream adapter if patch is missing
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - apply
+      - --check
+      - /home/hermes/.hermes/matrix-overlay/adapter-v0.23.4.patch
+  when: hermes_matrix_patch_present.rc != 0
+  changed_when: false
+  check_mode: false
+
+- name: Install the approved Matrix E2EE delivery module
+  become_user: hermes
+  ansible.builtin.copy:
+    src: matrix/direct_key_delivery.py
+    dest: /home/hermes/.hermes/hermes-agent/plugins/platforms/matrix/direct_key_delivery.py
+    mode: "0644"
+  register: hermes_matrix_module_result
+
+- name: Install the reviewed Matrix crypto regression tests
+  become_user: hermes
+  ansible.builtin.copy:
+    src: matrix/test_matrix_direct_key_delivery.py
+    dest: /home/hermes/.hermes/hermes-agent/tests/gateway/test_matrix_direct_key_delivery.py
+    mode: "0644"
+  register: hermes_matrix_test_result
+
+- name: Apply the reviewed adapter change after dependency update
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - apply
+      - /home/hermes/.hermes/matrix-overlay/adapter-v0.23.4.patch
+  when:
+    - not ansible_check_mode
+    - hermes_matrix_patch_present.rc != 0
+  register: hermes_matrix_adapter_result
+  changed_when: true
+
+- name: Confirm the installed Matrix adapter uses direct key delivery
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -F
+      - DirectKeyDeliveryMachine(client, crypto_store, crypto_state, grants=direct_grants)
+      - /home/hermes/.hermes/hermes-agent/plugins/platforms/matrix/adapter.py
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
