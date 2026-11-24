@@ -185,6 +185,11 @@
     - not ansible_check_mode
     - hermes_before_sha.stdout | trim != hermes_expected_sha
 
+- name: Mark that the Hermes dashboard must load the new release
+  ansible.builtin.set_fact:
+    hermes_update_completed: "{{ hermes_before_sha.stdout | trim != hermes_expected_sha }}"
+  when: not ansible_check_mode
+
 - name: Verify installed Hermes after the native update
   ansible.builtin.import_tasks: release-verify.yml
   when: not ansible_check_mode
