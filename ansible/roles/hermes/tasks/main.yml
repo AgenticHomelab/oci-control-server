@@ -75,8 +75,15 @@
     executable: /bin/bash
     creates: /home/hermes/.local/bin/hermes
 
+- name: Install reviewed Matrix overlay only on initial Hermes bootstrap
+  ansible.builtin.import_tasks: matrix-overlay.yml
+  when: not hermes_executable.stat.exists
+
 - name: Verify the installed Hermes release without updating it
   ansible.builtin.import_tasks: release-verify.yml
+
+- name: Audit the reviewed Matrix overlay without changing source
+  ansible.builtin.import_tasks: matrix-overlay-verify.yml
 
 - name: Secure Hermes dashboard credential parent directory
   tags: [hermes_dashboard_directory_fix, hermes_dashboard_credentials]
