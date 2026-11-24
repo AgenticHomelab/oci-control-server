@@ -354,75 +354,80 @@
       ]
     },
     "tests/test_eso_migration.py": {
-      "reason": "Synthetic OCID/secret-keyword fixtures and fake ansible payload keys in the migration test suite; no real credentials",
+      "reason": "Synthetic fixtures: bundle/secret key names and fake K8s secret values; no real credentials",
       "findings": [
         {
-          "tool": "gitleaks",
-          "rule": "generic-api-key",
-          "line": 35
-        },
-        {
-          "tool": "gitleaks",
-          "rule": "generic-api-key",
-          "line": 38
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 52
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 35
+          "line": 165
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 38
+          "line": 168
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 50
+          "line": 677
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 51
+          "line": 823
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 83
+          "line": 840
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 710
+          "line": 909
         }
       ],
       "git_blob_prefix_segments": [
-        "2874",
-        "baf2",
-        "a3b3",
-        "fe47"
+        "10a0",
+        "8539",
+        "d6cb",
+        "68db"
       ]
     },
     "scripts/eso-migration/eso_migrate.py": {
-      "reason": "Kubernetes Secret selector name strings in sanitized journal metadata; values never present",
+      "reason": "Sanitized driver: regex/annotation literals and Kubernetes Secret selector name strings; no credential values",
       "findings": [
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 575
+          "line": 105
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 576
+          "line": 1054
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 1055
+        },
+        {
+          "tool": "gitleaks",
+          "rule": "generic-api-key",
+          "line": 105
         }
       ],
       "git_blob_prefix_segments": [
-        "8710",
-        "a3c2",
-        "9f77",
-        "8d9a"
+        "0bee",
+        "0e43",
+        "9258",
+        "6e39"
       ]
     }
   }
