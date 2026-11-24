@@ -116,6 +116,14 @@ def test_hermes_release_update_is_isolated_and_not_automatic():
     ]
     assert any("update" in argv and "--plan" in argv for argv in commands)
     assert any(
+        "refs/tags/{{ hermes_release_version }}^{}" in argv
+        and "refs/tags/{{ hermes_release_version }}" not in argv
+        for argv in commands
+    ), "Only peeled annotated release commits may be selected"
+    assert "hermes_upstream_tag_refs.stdout.split()[0]" in (
+        ROLE / "tasks/release-update.yml"
+    ).read_text()
+    assert any(
         "update" in argv and "--channel" in argv
         and "stable" in argv and "--backup" in argv
         for argv in commands
