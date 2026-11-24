@@ -137,12 +137,8 @@ def test_runtime_policy_is_exact_and_fail_closed_against_bootstrap_secrets():
     }
     denied = compact(locals_["talos_eso_bootstrap_secret_ocids"])
     assert 'setunion(var.talos_eso_bootstrap_secret_ocids, toset(compact([' in denied
-    # The operator-approved raw shared Cloudflare token is exempt: it may be
-    # reused by ESO after the operator independently validates byte-equality.
-    shared_cloudflare = "control_cloudflare_secret_ocid"
     denied_names = set(re.findall(r"var\.[A-Za-z0-9_]+", denied))
-    assert {"var." + name for name in vault_variables - {shared_cloudflare}} <= denied_names
-    assert "var." + shared_cloudflare not in denied_names
+    assert {"var." + name for name in vault_variables} <= denied_names
     lifecycle = managed[("oci_identity_domains_user", "talos_eso")]["lifecycle"][0]
     conditions = {compact(p["condition"]) for p in lifecycle["precondition"]}
     assert conditions == {
@@ -242,17 +238,12 @@ def test_iam_runbook_records_operator_gates_and_name_based_provider_contract():
         assert required in text, required
 
 
-def test_cloudflare_shared_raw_token_is_the_only_approved_automatic_deny_exception():
-    """The one operator-approved exception: ESO may read the existing shared
-    raw Cloudflare token only after the operator independently validates that
-    cert-manager, cloudflare-ddns and external-ns hold exactly equal api-token
-    bytevalues. It stays out of the automatic deny union; every other control
-    host credential remains automatically denied, and the explicit bootstrap
-    denylist is unchanged and still fails closed."""
+def test_host_cloudflare_token_is_denied_after_separate_kubernetes_import():
+    """The deployed Kubernetes Cloudflare bundle is distinct from the host token."""
     denied = compact(blocks("locals")["talos_eso_bootstrap_secret_ocids"])
     assert 'setunion(var.talos_eso_bootstrap_secret_ocids, toset(compact([' in denied
     names = set(re.findall(r"var\.[A-Za-z0-9_]+", denied))
-    assert "var.control_cloudflare_secret_ocid" not in names
+    assert "var.control_cloudflare_secret_ocid" in names
     for still_denied in (
         "var.control_hermes_dashboard_secret_ocid",
         "var.control_omni_auth_secret_ocid",

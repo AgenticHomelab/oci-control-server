@@ -1,4 +1,4 @@
-# Operator-run ESO migration driver (issue #15)
+# Historical ESO migration driver and bootstrap recovery (issue #15)
 
 `scripts/eso-migration/eso_migrate.py` is a one-shot, operator-invoked
 driver that carries the approved ESO enablement end to end on the operator's
@@ -9,9 +9,30 @@ play. It creates no services, schedulers or daemons.
 It is **not** wired into any playbook, cron or CI execution. CI only runs
 its synthetic offline test suite.
 
-## Modes
+## Current recovery path
 
-Run strictly in order, each an explicit operator command:
+The 2026-11-24 migration was accepted: 32/32 synchronized runtime targets,
+unchanged UIDs/types/keys/bytes and functional applications. Do not rerun
+inventory, prepare, plan or apply as routine recovery. Retain the protected
+bootstrap-inputs.json and pinned bundle selectors independently. On the
+operator workstation, with independent OCI API-key access and the intended
+Kubernetes context, provision the flux-system and external-secrets namespaces
+if absent, then run the isolated bootstrap playbook using the protected
+extra-vars file:
+
+```sh
+ansible-playbook ansible/talos-secrets-bootstrap.yml --extra-vars @/protected/bootstrap-inputs.json
+```
+
+The role validates namespaces and exact pinned bundle versions, creates missing
+Secrets, verifies readback and refuses rotation. It does not need ESO, Flux or
+SOPS. Keep the actual file and contents outside Git and logs. If the original
+migration journal is needed, retain its source revision separately; the driver
+refuses a changed source HEAD. The standalone role is the normal recovery path.
+
+## Historical migration modes
+
+The following commands record the one-time migration sequence, not pending work:
 
 ```sh
 python3 scripts/eso-migration/eso_migrate.py inventory --config /protected/migrate.json
@@ -122,8 +143,8 @@ python3 scripts/eso-migration/eso_migrate.py bootstrap --config /protected/migra
   custody dir, operator OCI config+profile, absolute native tool paths,
   kubeconfig, explicit context. Optional: `reuse_hints`
   (`"namespace/name": {"ocid": <existing vault secret OCID>}`) for
-  operator-known shared payloads such as the existing host Cloudflare
-  token secret, `unrelated_sentinel_secret_ocid`, `flux_bundle.name`,
+  operator-known shared payloads (the host Cloudflare reuse proposal was
+  rejected during this migration), `unrelated_sentinel_secret_ocid`, `flux_bundle.name`,
   `bootstrap_extra_secret_ocids`.
 - **inventory** (schema 2): vault/compartment OCIDs, runtime targets
   (`name`, `keys`, `k8s: {namespace, name}`, `secret_ocid` null until
@@ -193,12 +214,8 @@ workspace, real openssl; no live calls):
 python3 -m pytest tests/test_eso_migration.py -q
 ```
 
-## Explicitly out of scope / remaining acceptance
+## Accepted deployment evidence
 
-- Live ESO reconciliation test (parent's continuation path).
-- Live IAM validation evidence (the driver automates the calls; producing
-  the actual evidence requires operator credentials and is intentionally
-  not exercised here).
-- Per-target ExternalSecret generation from the journal
-  (`runtime_targets` + `reuse_entries` carry the resolved selectors,
-  names, OCIDs and content shapes).
+See AgenticHomelab/talos-cluster#15 for the live IAM, bootstrap, pilot, bulk
+reconciliation and consumer acceptance. No repeat plan/apply, credential
+rotation or destructive recovery exercise is implied by this record.
