@@ -1,0 +1,17 @@
+diff --git a/plugins/platforms/matrix/adapter.py b/plugins/platforms/matrix/adapter.py
+--- a/plugins/platforms/matrix/adapter.py
++++ b/plugins/platforms/matrix/adapter.py
+@@ -1083,7 +1083,12 @@
+                 logger.warning("Matrix: crypto pickle migration failed — E2EE may not work correctly")
+             from plugins.platforms.matrix.adapter_crypto import _CryptoStateStore
+             crypto_state = _CryptoStateStore(state_store, self._joined_rooms, client)
+-            olm = OlmMachine(client, crypto_store, crypto_state)
++            direct_grants = self.config.extra.get("direct_key_delivery")
++            if direct_grants is not None and direct_grants != []:
++                from plugins.platforms.matrix.direct_key_delivery import DirectKeyDeliveryMachine
++                olm = DirectKeyDeliveryMachine(client, crypto_store, crypto_state, grants=direct_grants)
++            else:
++                olm = OlmMachine(client, crypto_store, crypto_state)
+             olm.share_keys_min_trust = TrustState.UNVERIFIED
+             olm.send_keys_min_trust = TrustState.UNVERIFIED
+             await olm.load()
