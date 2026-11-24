@@ -123,6 +123,14 @@ def test_hermes_release_update_is_isolated_and_not_automatic():
     assert "hermes_upstream_tag_refs.stdout.split()[0]" in (
         ROLE / "tasks/release-update.yml"
     ).read_text()
+    assert "resolve_source_target('stable', repository='NousResearch/hermes-agent')" in (
+        ROLE / "tasks/release-update.yml"
+    ).read_text()
+    native_gate = next(
+        task for task in update_tasks
+        if task["name"].startswith("Refuse a native stable-channel target")
+    )
+    assert "hermes_native_channel_sha.stdout | trim == hermes_expected_sha" in str(native_gate)
     assert any(
         "update" in argv and "--channel" in argv
         and "stable" in argv and "--backup" in argv
