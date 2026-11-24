@@ -170,8 +170,12 @@ def test_matrix_e2ee_source_overlay_is_reviewed_and_kept_out_of_normal_updates()
             usedforsecurity=False,
         ).hexdigest()
 
-    assert blob_sha(module) == "458e8012ba3b51da488d120fc4d951d7f6ced731"
-    assert blob_sha(regressions) == "18c1e8b16f6e038b8ccf69f61ddd5c137d9a1fa9"
+    import re
+    # Keep reviewed hashes in the Ansible audit only, not a second test-owned list.
+    audit_text = (ROLE / "tasks/matrix-overlay-verify.yml").read_text()
+    reviewed = re.findall(r"'([0-9a-f]{40})'", audit_text)
+    assert len(reviewed) == 3  # adapter, module, regression test
+    assert [blob_sha(module), blob_sha(regressions)] == reviewed[1:]
     ast.parse(module.read_text())
     ast.parse(regressions.read_text())
     assert "test_late_device_receives_current_index_without_history" in regressions.read_text()
