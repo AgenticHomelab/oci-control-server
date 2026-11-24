@@ -156,6 +156,34 @@
       - hermes_upstream_tag_refs.stdout_lines[0].endswith('refs/tags/' ~ hermes_release_version ~ '^{}')
     fail_msg: Could not resolve the reviewed annotated Hermes release to its commit.
 
+- name: Resolve the target the installed Hermes updater would select
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+    HERMES_HOME: /home/hermes/.hermes
+  ansible.builtin.command:
+    argv:
+      - /home/hermes/.hermes/hermes-agent/.hermes/bin/python
+      - -c
+      - >-
+        from hermes_cli.source_releases import resolve_source_target;
+        target = resolve_source_target('stable', repository='NousResearch/hermes-agent');
+        assert target.commit, 'Stable channel has no published commit';
+        print(target.commit)
+    chdir: /home/hermes/.hermes/hermes-agent
+  register: hermes_native_channel_sha
+  changed_when: false
+  check_mode: false
+
+- name: Refuse a native stable-channel target different from the reviewed release
+  ansible.builtin.assert:
+    that:
+      - hermes_native_channel_sha.stdout | trim == hermes_expected_sha
+    fail_msg: >-
+      The installed Hermes updater selects a different stable channel commit
+      than the reviewed GitHub release. Stop before any source or state
+      migration; update the plan or resolve the upstream channel discrepancy.
+
 - name: Read Hermes service user ID
   ansible.builtin.command:
     argv: [id, -u, hermes]
