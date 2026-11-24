@@ -1,0 +1,18 @@
+---
+# Deliberate operator-initiated reconciliation. Not part of the general host play.
+# Reuse the existing protected inventory, private variables, credentials and backups.
+- name: Update the reviewed Omni and Dex deployment only
+  hosts: control
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Render the reviewed Omni Compose and existing authentication configuration
+      ansible.builtin.import_role:
+        name: omni
+        tasks_from: configuration
+
+    - name: Reconcile only Omni and Dex containers
+      ansible.builtin.import_role:
+        name: omni
+        tasks_from: runtime
