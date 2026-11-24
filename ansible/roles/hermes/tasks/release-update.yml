@@ -131,7 +131,7 @@
       A different stable Hermes release is now available. Review the
       update, adjust the pinned version through a PR, and retry.
 
-- name: Resolve the reviewed tag to its exact upstream commit
+- name: Resolve the reviewed annotated release tag to its exact upstream commit
   become_user: hermes
   ansible.builtin.command:
     argv:
@@ -139,40 +139,22 @@
       - ls-remote
       - --tags
       - https://github.com/NousResearch/hermes-agent.git
-      - "refs/tags/{{ hermes_release_version }}"
       - "refs/tags/{{ hermes_release_version }}^{}"
   register: hermes_upstream_tag_refs
   changed_when: false
   check_mode: false
 
-- name: Pick the peeled commit for an annotated release tag
+- name: Extract the peeled release commit
   ansible.builtin.set_fact:
-    hermes_release_ref_lines: >-
-      {{
-        hermes_upstream_tag_refs.stdout_lines |
-        select('search', 'refs/tags/' ~ (hermes_release_version | regex_escape) ~ '\\^\\{\\}$') |
-        list
-      }}
+    hermes_expected_sha: "{{ hermes_upstream_tag_refs.stdout.split()[0] | default('') }}"
 
-- name: Resolve the expected release SHA
-  ansible.builtin.set_fact:
-    hermes_release_ref_line: >-
-      {{
-        (hermes_release_ref_lines | first | default('')) or
-        (hermes_upstream_tag_refs.stdout_lines |
-         select('search', 'refs/tags/' ~ (hermes_release_version | regex_escape) ~ '$') |
-         first | default(''))
-      }}
-
-- name: Extract the expected Git commit
-  ansible.builtin.set_fact:
-    hermes_expected_sha: "{{ hermes_release_ref_line.split()[0] | default('') }}"
-
-- name: Require an exact upstream release commit
+- name: Require an exact upstream release commit (not the annotated tag object)
   ansible.builtin.assert:
     that:
+      - hermes_upstream_tag_refs.stdout_lines | length == 1
       - hermes_expected_sha is match('^[0-9a-f]{40}$')
-    fail_msg: Could not resolve the reviewed Hermes release tag to a commit.
+      - hermes_upstream_tag_refs.stdout_lines[0].endswith('refs/tags/' ~ hermes_release_version ~ '^{}')
+    fail_msg: Could not resolve the reviewed annotated Hermes release to its commit.
 
 - name: Read Hermes service user ID
   ansible.builtin.command:
