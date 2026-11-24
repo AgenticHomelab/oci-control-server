@@ -293,26 +293,137 @@
     "docs/talos-secrets-bootstrap.md": {
       "reason": "Explicitly synthetic, non-deployable Vault secret OCID selectors in the bootstrap schema example, not credentials",
       "findings": [
-        {"tool": "gitleaks", "rule": "generic-api-key", "line": 76},
-        {"tool": "gitleaks", "rule": "generic-api-key", "line": 79}
+        {
+          "tool": "gitleaks",
+          "rule": "generic-api-key",
+          "line": 76
+        },
+        {
+          "tool": "gitleaks",
+          "rule": "generic-api-key",
+          "line": 79
+        }
       ],
-      "git_blob_prefix_segments": ["f4ab", "5416", "4212", "0adb"]
+      "git_blob_prefix_segments": [
+        "f4ab",
+        "5416",
+        "4212",
+        "0adb"
+      ]
     },
     "tests/test_talos_eso_iam.py": {
       "reason": "Negative lexical-validation fixtures: literal PEM headers with synthetic NOT-A-KEY payload, deliberately rejected as private material; no usable key",
       "findings": [
-        {"tool": "detect-secrets", "rule": "Private Key", "line": 206},
-        {"tool": "detect-secrets", "rule": "Private Key", "line": 207}
+        {
+          "tool": "detect-secrets",
+          "rule": "Private Key",
+          "line": 206
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Private Key",
+          "line": 207
+        }
       ],
-      "git_blob_prefix_segments": ["11b8", "4606", "b1fc", "f69e"]
+      "git_blob_prefix_segments": [
+        "d2de",
+        "b484",
+        "a17f",
+        "19fb"
+      ]
     },
     "tests/test_talos_secrets_bootstrap.py": {
       "reason": "Named synthetic OCI-key fixture and synthetic unrelated environment sentinel used to test no credential forwarding; no real credential bytes",
       "findings": [
-        {"tool": "detect-secrets", "rule": "Secret Keyword", "line": 36},
-        {"tool": "detect-secrets", "rule": "Secret Keyword", "line": 121}
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 36
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 121
+        }
       ],
-      "git_blob_prefix_segments": ["f6dc", "de5b", "68fd", "baab"]
+      "git_blob_prefix_segments": [
+        "f6dc",
+        "de5b",
+        "68fd",
+        "baab"
+      ]
+    },
+    "tests/test_eso_migration.py": {
+      "reason": "Synthetic OCID/secret-keyword fixtures and fake ansible payload keys in the migration test suite; no real credentials",
+      "findings": [
+        {
+          "tool": "gitleaks",
+          "rule": "generic-api-key",
+          "line": 35
+        },
+        {
+          "tool": "gitleaks",
+          "rule": "generic-api-key",
+          "line": 38
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 35
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 38
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 50
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 51
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 83
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 710
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "2874",
+        "baf2",
+        "a3b3",
+        "fe47"
+      ]
+    },
+    "scripts/eso-migration/eso_migrate.py": {
+      "reason": "Kubernetes Secret selector name strings in sanitized journal metadata; values never present",
+      "findings": [
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 575
+        },
+        {
+          "tool": "detect-secrets",
+          "rule": "Secret Keyword",
+          "line": 576
+        }
+      ],
+      "git_blob_prefix_segments": [
+        "8710",
+        "a3c2",
+        "9f77",
+        "8d9a"
+      ]
     }
   }
 }
