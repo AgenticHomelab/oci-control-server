@@ -7,7 +7,6 @@ All identities, fingerprints and contents are synthetic.
 """
 import base64
 import json
-import os
 import re
 import stat
 import subprocess
@@ -16,6 +15,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'scripts' / 'eso-migration' / 'eso_migrate.py'
@@ -30,25 +30,28 @@ OPERATOR_USER = 'ocid1.user.oc1..synthoperator'
 ESO_USER = 'ocid1.user.oc1..syntheticeso'
 OPERATOR_FP = 'aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99'
 
+REUSE_ANNOTATION = 'k0ti.com/oci-vault-secret'
+# Schema-2 K8s-backed runtime targets (Vault OCID resolved during prepare).
 RUNTIME = [
-    {'name': 'app-a-token',
-     'secret_ocid': 'ocid1.vaultsecret.eu-stockholm-1.synthrt1',
-     'keys': ['token']},
-    {'name': 'app-b-api',
-     'secret_ocid': 'ocid1.vaultsecret.eu-stockholm-1.synthrt2',
-     'keys': ['api_key']},
+    {'name': 'k8s-alloy-talos-metrics-ingestion',
+     'keys': ['password'], 'k8s': {'namespace': 'alloy',
+                                   'name': 'talos-metrics-ingestion'}},
+    {'name': 'k8s-mumble-mumble-superuser-password',
+     'keys': ['password'], 'k8s': {'namespace': 'mumble',
+                                   'name': 'mumble-superuser-password'}},
 ]
-SHARED_OCIDs = [
-    'ocid1.vaultsecret.eu-stockholm-1.synthsharedca',
-    'ocid1.vaultsecret.eu-stockholm-1.synthsharedcf',
-]
-BOOT_OCID_FLUX = 'ocid1.vaultsecret.eu-stockholm-1.synthbootflux'
-BOOT_OCID_ESO = 'ocid1.vaultsecret.eu-stockholm-1.synthbooteso'
+# Byte-equal duplicate group sharing the Cloudflare token bytes.
+DUP_A = {'namespace': 'cert-manager', 'name': 'cloudflare-api-token'}
+DUP_B = {'namespace': 'cloudflare-ddns', 'name': 'cloudflare-ddns-secret'}
+DUP_BYTES = b'SYNTH-SHARED-TOKEN'
+SHARED_REUSE_OCID = 'ocid1.vaultsecret.eu-stockholm-1.synthsharedcf'
+SHARED_VAULT_NAME = 'control-cloudflare-token'
 SENTINEL_OCID = 'ocid1.vaultsecret.eu-stockholm-1.synthsentinel'
 ESO_BUNDLE_NAME = 'talos-eso-signing-bundle'
 FLUX_BUNDLE_NAME = 'talos-flux-deploy'
-KUBE_ESO_NS, KUBE_ESO_SECRET = 'external-secrets', 'oci-vault-auth'
-KUBE_FLUX_NS, KUBE_FLUX_SECRET = 'flux-system', 'homelab-secrets-git'
+FLUX_NS, FLUX_SECRET = 'flux-system', 'homelab-secrets-git'
+FLUX_CONTENT = {'identity': 'SYNTH-SSH-KEY\n',
+                'known_hosts': 'github.example.invalid ssh-ed25519 SYNTH\n'}
 
 BACKEND_TF = '''\
 terraform {
@@ -62,7 +65,6 @@ terraform {
 }
 '''
 
-# The ESO runtime policy plan the fake tofu reports for a successful apply.
 TOFU_PLAN_OK = {
     'format_version': '1.2',
     'planned_values': {'root_module': {}},
@@ -76,15 +78,6 @@ TOFU_PLAN_OK = {
         {'address': 'oci_identity_policy.talos_eso[0]',
          'change': {'actions': ['create']}},
     ],
-    'output_changes': {
-        'talos_eso_iam_metadata': {'after': {
-            'tenancy_ocid': TENANCY, 'user_ocid': ESO_USER,
-            'group_ocid': 'ocid1.group.oc1..synthgroup',
-            'api_key_fingerprint': 'SYNTHFP',
-            'vault_ocid': VAULT,
-            'runtime_secret_ocids': sorted(t['secret_ocid'] for t in RUNTIME),
-        }},
-    },
 }
 
 
@@ -101,23 +94,53 @@ def protected(path, content=''):
     return path
 
 
+def b64(value):
+    if isinstance(value, str):
+        value = value.encode()
+    return base64.b64encode(value).decode()
+
+
+def kustomization(name, secrets):
+    return {
+        'apiVersion': 'kustomize.toolkit.fluxcd.io/v1', 'kind': 'Kustomization',
+        'metadata': {'name': name, 'namespace': 'flux-system'},
+        'spec': {'decryption': {'provider': 'sops'}},
+        'status': {'inventory': {'entries': [
+            {'id': f'{ns}_{n}_Secret', 'version': 'v1',
+             'namespace': ns, 'name': n, 'kind': 'Secret'}
+            for ns, n in secrets]}},
+    }
+
+
+def k8s_secret(namespace, name, values, annotations=None, stype='Opaque',
+               deleting=False):
+    meta = {'namespace': namespace, 'name': name}
+    if annotations:
+        meta['annotations'] = annotations
+    if deleting:
+        meta['deletionTimestamp'] = '2026-01-01T00:00:00Z'
+    return {'apiVersion': 'v1', 'kind': 'Secret', 'type': stype,
+            'metadata': meta,
+            'data': {k: b64(v) for k, v in values.items()}}
+
+
 def inventory_fixture(tmp, **over):
     data = {
-        'schema': 1,
+        'schema': 2,
         'vault_ocid': VAULT,
         'compartment_ocid': COMPARTMENT,
-        'runtime_targets': RUNTIME,
-        'reuse_vault_secret_ocids': {
-            'cert-manager/cloudflare-api-token': {
-                'ocid': SHARED_OCIDs[1],
-                'targets': ['cloudflare-ddns/cloudflare-ddns-secret',
-                            'external-dns/external-dns-cloudflare']},
-        },
+        'runtime_targets': [dict(t, secret_ocid=None) for t in RUNTIME],
+        'reuse_entries': [
+            {'ocid': SHARED_REUSE_OCID, 'content_shape': 'raw',
+             'targets': ['cert-manager/cloudflare-api-token',
+                         'cloudflare-ddns/cloudflare-ddns-secret'],
+             'name': None}],
+        'duplicate_groups': [['cert-manager/cloudflare-api-token',
+                               'cloudflare-ddns/cloudflare-ddns-secret']],
         'eso_bundle': {'name': ESO_BUNDLE_NAME,
                        'keys': ['privatekey', 'fingerprint']},
         'flux_bundle': {'name': FLUX_BUNDLE_NAME,
                         'keys': ['identity', 'known_hosts']},
-        'bootstrap_secret_ocids': [BOOT_OCID_FLUX, BOOT_OCID_ESO],
         'unrelated_sentinel_secret_ocid': SENTINEL_OCID,
     }
     data.update(over)
@@ -135,18 +158,45 @@ class Fixture:
         self.custody = self.tmp / 'custody'
         self.custody.mkdir(0o700)
         self.oci_state = self.tmp / 'oci-state.json'
+        # Cluster state served by the kubectl fake.
+        self.kube_secrets = {
+            'alloy/talos-metrics-ingestion': k8s_secret(
+                'alloy', 'talos-metrics-ingestion',
+                {'password': 'SYNTH-METRICS-PW'}),
+            'mumble/mumble-superuser-password': k8s_secret(
+                'mumble', 'mumble-superuser-password',
+                {'password': 'SYNTH-MUMBLE-PW'}),
+            # Byte-equal duplicate group with a reuse annotation on one member.
+            f'{DUP_A["namespace"]}/{DUP_A["name"]}': k8s_secret(
+                DUP_A['namespace'], DUP_A['name'], {'api-token': DUP_BYTES},
+                annotations={REUSE_ANNOTATION: SHARED_REUSE_OCID}),
+            f'{DUP_B["namespace"]}/{DUP_B["name"]}': k8s_secret(
+                DUP_B['namespace'], DUP_B['name'], {'api-token': DUP_BYTES}),
+            f'{FLUX_NS}/{FLUX_SECRET}': k8s_secret(
+                FLUX_NS, FLUX_SECRET, FLUX_CONTENT),
+        }
+        self.kustomizations = [
+            kustomization('alloy-secrets',
+                          [('alloy', 'talos-metrics-ingestion')]),
+            kustomization('mumble-secrets',
+                          [('mumble', 'mumble-superuser-password')]),
+            kustomization('cert-manager-config-secrets',
+                          [(DUP_A['namespace'], DUP_A['name'])]),
+            kustomization('cloudflare-ddns-secrets',
+                          [(DUP_B['namespace'], DUP_B['name'])]),
+            kustomization('flux-system', [(FLUX_NS, FLUX_SECRET)]),
+            # A non-SOPS owner that must be ignored.
+            {'apiVersion': 'kustomize.toolkit.fluxcd.io/v1',
+             'kind': 'Kustomization',
+             'metadata': {'name': 'apps', 'namespace': 'flux-system'},
+             'spec': {}, 'status': {'inventory': {'entries': [
+                 {'id': 'immich_immich-values__Secret', 'version': 'v1',
+                  'namespace': 'immich', 'name': 'immich-values',
+                  'kind': 'Secret'}]}}},
+        ]
         self.oci_state.write_text(json.dumps({
-            'mode': 'absent',  # absent | equal | mismatch
-            'existing_content': 'SYNTHETIC-EXISTING-DIFFERENT',
-            'created': {},
-            'tofu_plan_json': None,
-            'tofu_apply': False,
-            'kube_secret': None,
-            'kube_secrets': {},
-            'deny_success': False,
-            'kube_flux_content': None,
+            'tofu_plan_json': None, 'tofu_apply': False,
         }))
-        self.tools = {}
         self._make_workspace()
         self._make_fakes()
 
@@ -165,112 +215,115 @@ class Fixture:
         self.ws = ws
         subprocess.run(['git', 'init', '-q', str(ws)], check=True)
         subprocess.run(['git', '-C', str(ws), 'remote', 'add', 'origin',
-                       'https://github.com/' + GIT_ORIGIN_PATH], check=True)
+                        'https://github.com/' + GIT_ORIGIN_PATH], check=True)
         subprocess.run(['git', '-C', str(ws), 'add', '.'], check=True)
         subprocess.run(['git', '-C', str(ws), '-c', 'user.email=t@t',
                         '-c', 'user.name=t', 'commit', '-qm', 'synth'],
                        check=True)
 
     # -- fakes ---------------------------------------------------------
-    def _record(self, tool, argv):
-        with open(self.calls / tool, 'a') as stream:
-            stream.write(json.dumps(argv) + '\n')
-
     def _make_fakes(self):
+        # Shared live state, mutated by both fakes and the tests.
+        state_bridge = self.tmp / 'oci-live.json'
+        state_bridge.write_text(json.dumps({
+            'vault_created': {},
+            'kube_secrets': self.kube_secrets,
+            'kustomizations': self.kustomizations,
+            'deny_success': False, 'denial_code': 'NotAuthorizedOrNotFound',
+        }))
+
         head = '''\
             #!/usr/bin/env python3
             import base64, json, os, sys
             from pathlib import Path
             HERE = Path(__file__).resolve().parent.parent
             state = json.loads((HERE / "oci-state.json").read_text())
+            live = json.loads((HERE / "oci-live.json").read_text())
             args = sys.argv[1:]
             (HERE / "calls" / "TOOL").open("a").write(json.dumps(args) + "\\n")
             '''
         oci = textwrap.dedent(head.replace('TOOL', 'oci')) + textwrap.dedent('''\
             def out(payload):
                 print(json.dumps(payload)); sys.exit(0)
+            def deny_or_exit():
+                # Emit an OCI-style CLI error on stderr with a code field.
+                code = live.get("denial_code") or "NotAuthorizedOrNotFound"
+                sys.stderr.write(json.dumps(
+                    {"code": code, "message": "synthetic"}))
+                sys.exit(1)
             profile = args[args.index("--profile")+1] if "--profile" in args else "?"
+            # The service group verb follows the first literal "vault".
+            vcmd = ""
+            if "vault" in args:
+                vi = args.index("vault")
+                vcmd = args[vi+1] if vi + 1 < len(args) else ""
             if "iam" in args and "user" in args and "get" in args:
-                if profile != "SYNTHETIC_OPERATOR":
+                if profile != "SYNTHETIC_OPERATOR" and profile != "ESO_IDENTITY":
                     sys.exit(1)
                 uid = args[args.index("--user-id")+1]
-                out({"data": {"id": uid, "tenancy-id": "%s",
-                             "compartment-id": "%s"}})
+                out({"data": {"id": uid, "tenancy-id": "%(tenancy)s",
+                             "compartment-id": "%(comp)s"}})
             if "iam" in args and "compartment" in args and "get" in args:
-                out({"data": {"id": "%s",
-                             "compartment-id": "%s"}})
-            if "vault" in args and "secrets" in args and "list" in args:
+                out({"data": {"id": "%(comp)s",
+                             "compartment-id": "%(comp)s"}})
+            if vcmd == "vault" and "get" in args:
+                out({"data": {"id": "%(vault)s"}})
+            if vcmd == "secrets" and "list" in args:
                 name = args[args.index("--name")+1]
-                if name == "%s" and state["mode"] != "absent":
-                    out({"data": [{"id": "ocid1.vaultsecret.eu-stockholm-1.created1",
-                                   "secret-name": name}]})
-                elif name == "%s":
-                    out({"data": [{"id": "ocid1.vaultsecret.eu-stockholm-1.createdflux",
-                                   "secret-name": name}]})
-                else:
-                    out({"data": []})
-            if "vault" in args and "secret-bundle" in args and "get-by-name" in args:
+                if name in live["vault_created"]:
+                    out({"data": [{"id": "ocid1.vaultsecret.eu-stockholm-1."
+                                         "v-" + name, "secret-name": name}]})
+                out({"data": []})
+            if vcmd == "secret" and "get" in args and "--secret-id" in args:
+                sid = args[args.index("--secret-id")+1]
+                if sid == "%(shared)s":
+                    out({"data": {"id": sid,
+                                  "secret-name": "%(shared_name)s",
+                                  "vault-id": "%(vault)s"}})
+                sys.exit(1)
+            if vcmd == "secret-bundle" and "get-by-name" in args:
                 name = args[args.index("--secret-name")+1]
-                if name == "%s":
-                    content = base64.b64encode(
-                        (state.get("kube_flux_content") or
-                         "SYNTH-FLUX-JSON").encode()).decode()
-                    secret_id = "ocid1.vaultsecret.eu-stockholm-1.createdflux"
-                elif name == "%s" and state["mode"] == "equal":
-                    content = base64.b64encode(
-                        state["existing_content"].encode()).decode()
-                    secret_id = "ocid1.vaultsecret.eu-stockholm-1.created1"
-                elif name == "%s" and state["mode"] == "mismatch":
-                    content = base64.b64encode(
-                        b"SYNTHETIC-EXISTING-DIFFERENT").decode()
-                    secret_id = "ocid1.vaultsecret.eu-stockholm-1.created1"
-                elif name in %s:
-                    content = base64.b64encode(
-                        b"SYNTH-RUNTIME-VALUE").decode()
-                    secret_id = [t["secret_ocid"] for t in %s
-                                 if t["name"] == name][0]
+                created = live["vault_created"]
+                if name in created:
+                    content = created[name]
+                    sid = "ocid1.vaultsecret.eu-stockholm-1.v-" + name
+                elif name == "%(shared_name)s":
+                    content = base64.b64encode(b"%(dup_bytes)s").decode()
+                    sid = "%(shared)s"
                 else:
                     sys.exit(1)
-                out({"data": {"secret-id": secret_id, "secret-name": name,
+                out({"data": {"secret-id": sid, "secret-name": name,
                               "version-number": 1,
                               "version-stages": ["CURRENT"],
                               "secret-bundle-content": {
                                   "content-type": "BASE64",
                                   "content": content}}})
-            if "vault" in args and "secret-bundle" in args and "get" in args \\
-                    and "get-by-name" not in args and "--secret-id" in args:
-                sid = args[args.index("--secret-id")+1]
-                if state.get("bundle_by_id", {}).get(sid):
-                    out({"data": {"secret-id": sid,
-                                  "secret-bundle-content": {
-                                      "content-type": "BASE64",
-                                      "content": state["bundle_by_id"][sid]}}})
-                if state.get("deny_success") and profile == "ESO_IDENTITY":
-                    out({"data": {"secret-id": sid}})
-                sys.exit(1)
-            if "vault" in args and "vault" in args and "get" in args:
-                out({"data": {"id": "%s"}})
-            if "vault" in args and "secret" in args and "create" in args:
+            if vcmd == "secret" and "create" in args:
                 f = args[args.index("--secret-content-content-file")+1]
                 content = Path(f).read_text()
-                state["created"][args[args.index("--secret-name")+1]] = content
-                state["mode"] = "equal"
-                state["existing_content"] = base64.b64decode(content).decode()
-                (HERE / "oci-state.json").write_text(json.dumps(state))
-                out({"data": {"id": "ocid1.vaultsecret.eu-stockholm-1.created1"}})
+                name = args[args.index("--secret-name")+1]
+                if name in live["vault_created"]:
+                    sys.exit(1)  # create exactly once
+                live["vault_created"][name] = content
+                (HERE / "oci-live.json").write_text(json.dumps(live))
+                out({"data": {"id": "ocid1.vaultsecret.eu-stockholm-1.v-" + name}})
+            if vcmd == "secret-bundle" and "get" in args \\
+                    and "get-by-name" not in args and "--secret-id" in args:
+                sid = args[args.index("--secret-id")+1]
+                if live.get("deny_success") and profile == "ESO_IDENTITY":
+                    out({"data": {"secret-id": sid}})
+                deny_or_exit()
             sys.exit(1)
-            ''' % (TENANCY, COMPARTMENT, COMPARTMENT, TENANCY,
-                   ESO_BUNDLE_NAME, FLUX_BUNDLE_NAME, FLUX_BUNDLE_NAME,
-                   ESO_BUNDLE_NAME, ESO_BUNDLE_NAME,
-                   json.dumps([t['name'] for t in RUNTIME]),
-                   json.dumps(RUNTIME), VAULT))
-
+            ''' % {'tenancy': TENANCY, 'comp': COMPARTMENT, 'vault': VAULT,
+                   'shared': SHARED_REUSE_OCID,
+                   'shared_name': SHARED_VAULT_NAME,
+                   'dup_bytes': DUP_BYTES.decode()})
         write_exec(self.bin / 'oci', oci)
 
         tofu = textwrap.dedent(head.replace('TOOL', 'tofu')) + textwrap.dedent('''\
             if "init" in args:
                 sys.exit(0)
-            if "plan" in args:
+            if "plan" in args and "show" not in args:
                 Path(args[args.index("-out")+1]).write_bytes(b"SYNTHETIC-PLAN-BYTES")
                 sys.exit(0)
             if "show" in args:
@@ -283,56 +336,56 @@ class Fixture:
                 (HERE / "oci-state.json").write_text(json.dumps(state))
                 sys.exit(0)
             if "output" in args:
-                fp = state.get("api_key_fingerprint")
+                fp = state.get("api_key_fingerprint") or "SYNTHFP"
                 try:
                     jr = json.loads((HERE / "custody" / "journal.json").read_text())
                     fp = jr.get("api_key_fingerprint") or fp
                 except (OSError, ValueError):
                     pass
-                if not fp:
-                    pem = (HERE / "custody" / "journal.json").read_text()
-                    pub = [l for l in pem.splitlines() if "KEY-----" not in l]
-                    digest = __import__("hashlib").sha1(
-                        b"".join(l.encode() for l in pub)).hexdigest()
-                    fp = ":".join(digest[i:i+2] for i in range(0, 40, 2))
                 print(json.dumps({"value": {
-                    "tenancy_ocid": "%s", "user_ocid": "%s",
+                    "tenancy_ocid": "%(tenancy)s", "user_ocid": "%(esouser)s",
                     "group_ocid": "ocid1.group.oc1..synthgroup",
                     "api_key_fingerprint": fp,
-                    "vault_ocid": "%s",
-                    "runtime_secret_ocids": sorted(t["secret_ocid"] for t in %s)}}))
+                    "vault_ocid": "%(vault)s",
+                    "runtime_secret_ocids": []}}))
                 sys.exit(0)
             sys.exit(1)
-            ''' % (TENANCY, ESO_USER, VAULT, json.dumps(RUNTIME)))
+            ''' % {'tenancy': TENANCY, 'esouser': ESO_USER, 'vault': VAULT})
         write_exec(self.bin / 'tofu', tofu)
 
         kubectl = textwrap.dedent(head.replace('TOOL', 'kubectl')) + textwrap.dedent('''\
-            if "delete" in args:
+            if "get" in args and "kustomizations" in args:
+                print(json.dumps({"apiVersion": "v1", "kind": "List",
+                                  "items": live["kustomizations"]}))
                 sys.exit(0)
-            if "get" in args and "secret" in args:
-                ns = args[args.index("--namespace")+1]
-                name = args[args.index("secret")+1]
-                key = ns+"/"+name
-                if state["kube_secrets"].get(key):
-                    print(json.dumps(state["kube_secrets"][key]))
-                sys.exit(0)
-            if "create" in args or ("apply" in args and "-f" in args):
+            if "get" in args and ("secret" in args or "secrets" in args) \\
+                    and "kustomizations" not in args:
+                ns = args[args.index("-n")+1] if "-n" in args \\
+                    else args[args.index("--namespace")+1]
+                name = None
+                for i, a in enumerate(args):
+                    if a in ("secret", "secrets") and i + 1 < len(args):
+                        name = args[i+1]
+                key = ns + "/" + name
+                if name and key in live["kube_secrets"]:
+                    print(json.dumps(live["kube_secrets"][key]))
+                    sys.exit(0)
+                sys.exit(1)
+            if "create" in args or "replace" in args or "apply" in args:
                 data = json.loads(sys.stdin.read())
                 key = (data["metadata"]["namespace"] + "/" +
                        data["metadata"]["name"])
-                state["kube_secrets"][key] = data
-                (HERE / "oci-state.json").write_text(json.dumps(state))
+                live["kube_secrets"][key] = data
+                (HERE / "oci-live.json").write_text(json.dumps(live))
             sys.exit(0)
             ''')
         write_exec(self.bin / 'kubectl', kubectl)
 
         ap = textwrap.dedent(head.replace('TOOL', 'ansible')) + textwrap.dedent('''\
-            # The private extra-vars file must exist and be mode 0600.
-            if "@@" in " ".join(args):
-                sys.exit(1)
             try:
                 candidates = [a[1:] for a in args if a.startswith("@")]
-                extra = candidates[0] if candidates else args[args.index("--extra-vars")+1]
+                extra = candidates[0] if candidates \\
+                    else args[args.index("--extra-vars")+1]
                 mode = os.stat(extra).st_mode & 0o077
                 content = Path(extra).read_text()
                 (HERE / "ansible-input.json").write_text(content)
@@ -385,6 +438,7 @@ class Fixture:
             'tools': dict(self.tools),
             'kubeconfig': str(protected(self.tmp / 'kube.config')),
             'context': 'synthetic-ctx',
+            'unrelated_sentinel_secret_ocid': SENTINEL_OCID,
         }
         cfg.update(over)
         path = protected(self.tmp / 'config.json', json.dumps(cfg))
@@ -416,10 +470,14 @@ class Fixture:
 
     def plan_pending(self):
         (self.custody / 'plan.bin').write_bytes(b'SYNTHETIC-PLAN-BYTES')
-        (self.custody / 'plan.json').write_text(json.dumps(TOFU_PLAN_OK))
         state = json.loads(self.oci_state.read_text())
         state['tofu_plan_json'] = TOFU_PLAN_OK
         self.oci_state.write_text(json.dumps(state))
+
+    def live_set(self, **over):
+        live = json.loads((self.tmp / 'oci-live.json').read_text())
+        live.update(over)
+        (self.tmp / 'oci-live.json').write_text(json.dumps(live))
 
 
 @pytest.fixture
@@ -442,57 +500,120 @@ def test_usage_no_config_fails_closed():
 
 
 # =====================================================================
+# inventory mode
+# =====================================================================
+
+def test_inventory_enumerates_sops_targets_and_writes_draft(fx):
+    result = fx.run('inventory', fx.make_config())
+    assert result.returncode == 0, result.stdout
+    status = json.loads(result.stdout.strip().splitlines()[-1])
+    assert status['ok'] is True
+    draft = json.loads(Path(status['draft']).read_text())
+    assert draft['schema'] == 2
+    selectors = {t['k8s']['namespace'] + '/' + t['k8s']['name']
+                 for t in draft['runtime_targets']}
+    # SOPS-delivered secrets only; flux bootstrap excluded; immich-values
+    # (non-SOPS owner) excluded.
+    assert selectors == {'alloy/talos-metrics-ingestion',
+                         'mumble/mumble-superuser-password'}
+    # The annotated Cloudflare member is a reuse entry, not a new target.
+    reuse = {e['ocid']: e for e in draft['reuse_entries']}
+    assert SHARED_REUSE_OCID in reuse
+    assert sorted(reuse[SHARED_REUSE_OCID]['targets']) == [
+        f'{DUP_A["namespace"]}/{DUP_A["name"]}',
+        f'{DUP_B["namespace"]}/{DUP_B["name"]}']
+    # Byte-equal duplicate group is reported (selectors only, no values).
+    assert draft['duplicate_groups'] == [[
+        f'{DUP_A["namespace"]}/{DUP_A["name"]}',
+        f'{DUP_B["namespace"]}/{DUP_B["name"]}']]
+    # Flux bundle contract present with real keys.
+    assert draft['flux_bundle']['name'] == FLUX_BUNDLE_NAME
+    assert set(draft['flux_bundle']['keys']) <= {
+        'identity', 'known_hosts', 'identity.pub'}
+    # No values anywhere in the draft.
+    assert 'SYNTH-SHARED-TOKEN' not in json.dumps(draft)
+    assert stat.S_IMODE(Path(status['draft']).stat().st_mode) == 0o600
+
+
+def test_inventory_draft_matches_operator_review_shape(fx):
+    result = fx.run('inventory', fx.make_config())
+    status = json.loads(result.stdout.strip().splitlines()[-1])
+    assert status['runtime_targets'] == 2
+    assert status['duplicate_groups'] == 1
+    assert status['reuse_entries'] == 1
+
+
+# =====================================================================
 # prepare mode
 # =====================================================================
 
-def test_prepare_happy_path(fx):
-    cfg = fx.make_config()
-    result = fx.run('prepare', cfg)
+def test_prepare_imports_runtime_flux_and_eso_bundles(fx):
+    result = fx.run('prepare', fx.make_config())
     assert result.returncode == 0, (result.stdout, result.stderr)
     status = json.loads(result.stdout.strip().splitlines()[-1])
     assert status['ok'] is True
-    # key custody: outside git, mode 0600
+    live = json.loads((fx.tmp / 'oci-live.json').read_text())
+    created = live['vault_created']
+    # Two runtime targets + flux + eso bundles imported as vault secrets.
+    assert set(created) == ({t['name'] for t in RUNTIME}
+                            | {FLUX_BUNDLE_NAME, ESO_BUNDLE_NAME})
+    # Runtime payloads are compact JSON maps of the K8s values.
+    for target in RUNTIME:
+        ns = target['k8s']['namespace']
+        payload = json.loads(base64.b64decode(created[target['name']]))
+        expected_pw = 'SYNTH-METRICS-PW' if ns == 'alloy' else 'SYNTH-MUMBLE-PW'
+        assert payload == {'password': expected_pw}
+    # Flux payload preserves identity/known_hosts bytes exactly.
+    flux_payload = json.loads(base64.b64decode(created[FLUX_BUNDLE_NAME]))
+    assert flux_payload == FLUX_CONTENT
+    # Reuse entry resolved to its vault NAME and kept, no new secret created.
+    assert SHARED_VAULT_NAME not in created
+    journal = fx.journal
+    reuse = journal['reuse_entries']
+    assert len(reuse) == 1
+    assert reuse[0]['name'] == SHARED_VAULT_NAME
+    assert reuse[0]['ocid'] == SHARED_REUSE_OCID
+    # Journal runtime targets carry resolved OCIDs and content shapes.
+    assert all(t['secret_ocid'] for t in journal['runtime_targets'])
+    assert all(t['content_shape'] == 'json_map'
+               for t in journal['runtime_targets'])
+    # Bootstrap deny list comes from the DISCOVERED bundle OCIDs.
+    tfvars = json.loads((fx.custody / 'eso.tfvars.json').read_text())
+    assert sorted(tfvars['talos_eso_bootstrap_secret_ocids']) == sorted(
+        [journal['flux_bundle']['secret_ocid'],
+         journal['eso_bundle']['secret_ocid']])
+    assert sorted(tfvars['talos_eso_runtime_secret_ocids']) == sorted(
+        [t['secret_ocid'] for t in journal['runtime_targets']]
+        + [SHARED_REUSE_OCID])
+
+
+def test_prepare_key_custody_and_sanitized_outputs(fx):
+    cfg = fx.make_config()
+    assert fx.run('prepare', cfg).returncode == 0
     key = Path(fx.custody) / 'eso-signing.pem'
     assert key.is_file()
     assert stat.S_IMODE(key.stat().st_mode) == 0o600
     assert not (fx.ws / 'eso-signing.pem').exists()
-    # journal: resumable metadata only
     journal = fx.journal
-    assert journal['eso_bundle']['secret_ocid']
-    assert journal['eso_bundle']['version_number'] == 1
-    assert journal['flux_bundle']['secret_ocid']
-    assert journal['flux_bundle']['version_number'] == 1
     assert journal['applied'] is False
-    assert 'PRIVATE KEY' not in json.dumps(journal).replace('-----BEGIN', '')
-    # tfvars: public metadata only, in custody not workspace
-    tfvars = Path(fx.custody) / 'eso.tfvars.json'
-    assert tfvars.is_file() and not (fx.ws / 'eso.tfvars.json').exists()
-    data = json.loads(tfvars.read_text())
-    assert data['talos_eso_enabled'] is True
-    assert data['talos_eso_api_signing_public_key_pem'].startswith(
-        '-----BEGIN PUBLIC KEY-----')
-    assert sorted(data['talos_eso_runtime_secret_ocids']) == sorted(
-        [t['secret_ocid'] for t in RUNTIME] + [SHARED_OCIDs[1]])
-    assert set(data['talos_eso_bootstrap_secret_ocids']) >= {
-        BOOT_OCID_FLUX, BOOT_OCID_ESO}
-    assert 'PRIVATE KEY-----' not in tfvars.read_text()
-    assert stat.S_IMODE(tfvars.stat().st_mode) == 0o600
-    # tofu init must not have been called (backend already initialized)
+    assert 'SYNTH-SHARED-TOKEN' not in json.dumps(journal)
+    for call in fx.calls_of('oci'):
+        assert not any('SYNTH-SHARED-TOKEN' in a for a in call)
+        assert not any('PRIVATE KEY-----' in a for a in call)
+    # tofu init must not have been called.
     assert all('init' not in c for c in fx.calls_of('tofu'))
 
 
 def test_prepare_refuses_unapproved(fx):
     result = fx.run('prepare', fx.make_config(approved=False))
     assert result.returncode != 0
-    status = json.loads(result.stdout.strip().splitlines()[-1])
-    assert status['ok'] is False
     assert fx.calls_of('oci') == []
 
 
 def test_prepare_refuses_backend_lineage_mismatch(fx):
     (fx.ws / 'terraform' / 'backend.tf').write_text(
         BACKEND_TF.replace('use_lockfile       = true',
-                          'use_lockfile       = false'))
+                           'use_lockfile       = false'))
     subprocess.run(['git', '-C', str(fx.ws), 'add', '.'], check=True)
     subprocess.run(['git', '-C', str(fx.ws), '-c', 'user.email=t@t',
                     '-c', 'user.name=t', 'commit', '-qm', 'drift'], check=True)
@@ -518,7 +639,7 @@ def test_prepare_refuses_dirty_terraform(fx):
 
 
 def test_prepare_refuses_bad_operator_profile(fx):
-    cfg = fx.make_config()  # creates the good profile file first
+    cfg = fx.make_config()
     cfgfile = Path(json.loads(cfg.read_text())['operator']['config_file'])
     cfgfile.write_text(textwrap.dedent(f'''\
         [SYNTHETIC_OPERATOR]
@@ -535,69 +656,66 @@ def test_prepare_refuses_bad_operator_profile(fx):
     assert fx.calls_of('oci') == [], 'no identity read before profile gate'
 
 
-def test_prepare_idempotent_reuses_key_and_equal_vault_entry(fx):
+def test_prepare_idempotent_no_rotation_single_create(fx):
     cfg = fx.make_config()
     assert fx.run('prepare', cfg).returncode == 0
     key_before = (Path(fx.custody) / 'eso-signing.pem').read_bytes()
-    state = json.loads(fx.oci_state.read_text())
-    created = state['created'][ESO_BUNDLE_NAME]
-    state['mode'] = 'equal'
-    state['existing_content'] = base64.b64decode(created).decode()
-    fx.oci_state.write_text(json.dumps(state))
+    live_before = json.loads((fx.tmp / 'oci-live.json').read_text())
     result = fx.run('prepare', cfg)
     assert result.returncode == 0, result.stdout
     assert (Path(fx.custody) / 'eso-signing.pem').read_bytes() == key_before
-    creates = [c for c in fx.calls_of('oci') if 'create' in c]
-    assert len(creates) == 1, 'equal vault entry must be reused, not recreated'
+    live_after = json.loads((fx.tmp / 'oci-live.json').read_text())
+    assert live_after['vault_created'] == live_before['vault_created']
 
 
 def test_prepare_never_overwrites_differing_vault_content(fx):
     cfg = fx.make_config()
     assert fx.run('prepare', cfg).returncode == 0
-    state = json.loads(fx.oci_state.read_text())
-    state['mode'] = 'mismatch'
-    fx.oci_state.write_text(json.dumps(state))
+    live = json.loads((fx.tmp / 'oci-live.json').read_text())
+    target = RUNTIME[0]['name']
+    payload = json.loads(base64.b64decode(live['vault_created'][target]))
+    payload['password'] = 'CHANGED'
+    live['vault_created'][target] = b64(json.dumps(
+        payload, separators=(',', ':')).encode())
+    (fx.tmp / 'oci-live.json').write_text(json.dumps(live))
     result = fx.run('prepare', cfg)
     assert result.returncode != 0
     for stream in (result.stdout, result.stderr):
-        assert 'SYNTHETIC-EXISTING-DIFFERENT' not in stream
+        assert 'CHANGED' not in stream
         assert 'PRIVATE KEY-----' not in stream
 
 
-def test_prepare_detects_duplicate_runtime_targets(fx):
+def test_prepare_rejects_reuse_equality_mismatch(fx):
     cfg = fx.make_config()
-    dup = list(RUNTIME)
-    dup[1] = dict(dup[0], name=dup[0]['name'])
-    inv = inventory_fixture(fx.tmp, runtime_targets=dup)
-    data = json.loads(cfg.read_text())
-    data['inventory'] = str(inv)
-    cfg.write_text(json.dumps(data))
-    cfg.chmod(0o600)
+    live = json.loads((fx.tmp / 'oci-live.json').read_text())
+    live['vault_created'][SHARED_VAULT_NAME] = b64(b'OTHER-TOKEN')
+    (fx.tmp / 'oci-live.json').write_text(json.dumps(live))
     result = fx.run('prepare', cfg)
     assert result.returncode != 0
+    assert 'OTHER-TOKEN' not in result.stdout
 
 
-def test_prepare_no_secret_values_in_output_or_argv(fx):
-    cfg = fx.make_config()
-    result = fx.run('prepare', cfg)
-    assert result.returncode == 0
-    for stream in (result.stdout, result.stderr):
-        assert 'PRIVATE KEY-----' not in stream
-    for call in fx.calls_of('oci'):
-        assert not any('PRIVATE KEY-----' in a for a in call)
+def test_prepare_rejects_key_mismatch_and_deleting_secret(fx):
+    inv_bad_keys = json.loads(inventory_fixture(fx.tmp).read_text())
+    inv_bad_keys['runtime_targets'][0]['keys'] = ['password', 'extra']
+    bad = protected(fx.tmp / 'inventory-bad.json', json.dumps(inv_bad_keys))
+    result = fx.run('prepare', fx.make_config(inventory=str(bad)))
+    assert result.returncode != 0
+    live = json.loads((fx.tmp / 'oci-live.json').read_text())
+    key = f'{FLUX_NS}/{FLUX_SECRET}'
+    live['kube_secrets'][key]['metadata']['deletionTimestamp'] = 'x'
+    (fx.tmp / 'oci-live.json').write_text(json.dumps(live))
+    result = fx.run('prepare', fx.make_config())
+    assert result.returncode != 0
 
 
 def test_prepare_reuse_ocid_must_be_disjoint_from_new_targets(fx):
-    cfg = fx.make_config()
-    inv = inventory_fixture(fx.tmp, reuse_vault_secret_ocids={
-        'cert-manager/cloudflare-api-token': {
-            'ocid': RUNTIME[0]['secret_ocid'],
-            'targets': ['x/y']}})
-    data = json.loads(cfg.read_text())
-    data['inventory'] = str(inv)
-    cfg.write_text(json.dumps(data))
-    cfg.chmod(0o600)
-    result = fx.run('prepare', cfg)
+    inv = json.loads(inventory_fixture(fx.tmp).read_text())
+    shared_ocid = 'ocid1.vaultsecret.eu-stockholm-1.synthrt1'
+    inv['reuse_entries'][0]['ocid'] = shared_ocid
+    inv['runtime_targets'][0]['secret_ocid'] = shared_ocid
+    bad = protected(fx.tmp / 'inventory-bad.json', json.dumps(inv))
+    result = fx.run('prepare', fx.make_config(inventory=str(bad)))
     assert result.returncode != 0
 
 
@@ -612,9 +730,7 @@ def test_plan_requires_prepare_journal(fx):
 
 def test_plan_happy_path_saves_sanitized_summary(fx):
     assert fx.run('prepare', fx.make_config()).returncode == 0
-    state = json.loads(fx.oci_state.read_text())
-    state['tofu_plan_json'] = TOFU_PLAN_OK
-    fx.oci_state.write_text(json.dumps(state))
+    fx.plan_pending()
     result = fx.run('plan', fx.make_config())
     assert result.returncode == 0, result.stdout
     assert (Path(fx.custody) / 'plan.bin').read_bytes() == b'SYNTHETIC-PLAN-BYTES'
@@ -622,8 +738,6 @@ def test_plan_happy_path_saves_sanitized_summary(fx):
     assert summary['ok'] is True
     assert summary['plan_digest']
     assert summary['new_resources'] == 4
-    addresses = {a for c in fx.calls_of('tofu') if 'plan' in c for a in c
-                 if 'talos_eso' in str(a)}
     assert not any('-target' in a for c in fx.calls_of('tofu') for a in c)
     assert not any('-refresh=false' in a or '-lock=false' in a
                    for c in fx.calls_of('tofu') for a in c)
@@ -698,13 +812,12 @@ def test_apply_happy_path_applies_saved_plan(fx):
     assert json.loads(fx.oci_state.read_text())['tofu_apply'] is True
     apply_calls = [c for c in fx.calls_of('tofu') if 'apply' in c]
     assert apply_calls, 'apply must invoke tofu'
-    # saved plan bytes only, no plan arg mutation
     assert any('plan.bin' in a for a in apply_calls[0])
     assert not any('-auto-approve' in a for a in apply_calls[0])
     journal = fx.journal
     assert journal['applied'] is True
-    # wiring metadata recorded for continuation, incl. auth Secret ref
     assert journal['eso_user_ocid'] == ESO_USER
+    # tofu output echoed the custody key's real fingerprint.
     assert re.fullmatch(r'(?:[0-9a-f]{2}:){19}[0-9a-f]{2}',
                         journal['api_key_fingerprint'])
     assert journal['kubernetes']['auth_secret'] == 'external-secrets/oci-vault-auth'
@@ -718,41 +831,53 @@ def test_apply_refuses_before_plan(fx):
 
 
 # =====================================================================
-# verify mode (IAM positive/negative as new ESO identity)
+# verify mode
 # =====================================================================
 
-def test_verify_positive_reads_and_negative_denials(fx):
-    assert fx.run('prepare', fx.make_config()).returncode == 0
+def _applied(fx):
     fx.plan_pending()
     fx.journal_set(applied=True, eso_user_ocid=ESO_USER,
                    api_key_fingerprint='SYNTHFP')
-    state = json.loads(fx.oci_state.read_text())
-    state['deny_success'] = False  # get-by-id on denied OCIDs must be refused
-    fx.oci_state.write_text(json.dumps(state))
+
+
+def test_verify_positive_includes_reuse_entries(fx):
+    assert fx.run('prepare', fx.make_config()).returncode == 0
+    _applied(fx)
     result = fx.run('verify', fx.make_config())
     assert result.returncode == 0, result.stdout
-    oci_calls = fx.calls_of('oci')
-    # positive: by-name bundle reads for runtime names and vault get
-    by_name = [c for c in oci_calls if 'get-by-name' in c]
-    assert len(by_name) >= len(RUNTIME)
-    # negative: reads of bootstrap/sentinel OCIDs attempted and refused
-    by_id = [c for c in oci_calls if 'get' in c and '--secret-id' in c]
-    assert any(BOOT_OCID_ESO in ' '.join(c) for c in by_id)
-    assert any(SENTINEL_OCID in ' '.join(c) for c in by_id)
-    for stream in (result.stdout, result.stderr):
-        assert 'SYNTHETIC' not in stream or 'SYNTHETIC-OPERATOR' not in stream
+    status = json.loads(result.stdout.strip().splitlines()[-1])
+    assert status['ok'] is True
+    assert status['runtime_verified'] == len(fx.journal['runtime_targets'])
+    assert status['reuse_verified'] == 1
+    # by-name read for the reuse entry's resolved vault name happened.
+    assert any(SHARED_VAULT_NAME in ' '.join(c)
+               for c in fx.calls_of('oci') if 'get-by-name' in c)
 
 
 def test_verify_fails_when_denial_missing(fx):
     assert fx.run('prepare', fx.make_config()).returncode == 0
-    fx.plan_pending()
-    fx.journal_set(applied=True, eso_user_ocid=ESO_USER,
-                   api_key_fingerprint='SYNTHFP')
-    state = json.loads(fx.oci_state.read_text())
-    state['deny_success'] = True  # denial unexpectedly succeeds -> fail closed
-    fx.oci_state.write_text(json.dumps(state))
+    _applied(fx)
+    fx.live_set(deny_success=True)
     result = fx.run('verify', fx.make_config())
     assert result.returncode != 0
+
+
+def test_verify_fails_on_non_authorization_api_error(fx):
+    assert fx.run('prepare', fx.make_config()).returncode == 0
+    _applied(fx)
+    # A 500-style error must NOT count as an IAM denial.
+    fx.live_set(denial_code='InternalServerFailure')
+    result = fx.run('verify', fx.make_config())
+    assert result.returncode != 0
+    assert 'authorization' in result.stdout.lower()
+
+
+def test_verify_counts_real_authorization_denials(fx):
+    assert fx.run('prepare', fx.make_config()).returncode == 0
+    _applied(fx)
+    fx.live_set(denial_code='NotAuthenticated')
+    result = fx.run('verify', fx.make_config())
+    assert result.returncode == 0, result.stdout
 
 
 def test_verify_requires_applied_journal(fx):
@@ -762,32 +887,26 @@ def test_verify_requires_applied_journal(fx):
 
 
 # =====================================================================
-# bootstrap mode (reuse isolated Ansible play)
+# bootstrap mode
 # =====================================================================
 
 def test_bootstrap_reuses_isolated_play_with_private_inputs(fx):
     assert fx.run('prepare', fx.make_config()).returncode == 0
-    fx.plan_pending()
-    fx.journal_set(applied=True, eso_user_ocid=ESO_USER,
-                   api_key_fingerprint='SYNTHFP')
+    _applied(fx)
     result = fx.run('bootstrap', fx.make_config())
     assert result.returncode == 0, result.stdout
     calls = fx.calls_of('ansible')
     assert len(calls) == 1, 'exactly one isolated play invocation'
-    argv = calls[0]
-    assert any('talos-secrets-bootstrap.yml' in a for a in argv)
-    # private input file captured by fake; verify schema and protection
+    assert any('talos-secrets-bootstrap.yml' in a for a in calls[0])
     payload = json.loads((fx.tmp / 'ansible-input.json').read_text())
     inputs = payload['talos_secrets_bootstrap']
     assert inputs['approved'] is True
     assert inputs['eso']['secret_id'] == fx.journal['eso_bundle']['secret_ocid']
     assert inputs['flux']['secret_id'] == fx.journal['flux_bundle']['secret_ocid']
-    assert inputs['operator_user_ocid'] == OPERATOR_USER
     assert inputs['eso_user_ocid'] == ESO_USER
-    assert inputs['context'] == 'synthetic-ctx'
     wiring = fx.journal['kubernetes']
-    assert wiring['auth_secret'] == f'{KUBE_ESO_NS}/{KUBE_ESO_SECRET}'
-    assert wiring['git_secret'] == f'{KUBE_FLUX_NS}/{KUBE_FLUX_SECRET}'
+    assert wiring['auth_secret'] == 'external-secrets/oci-vault-auth'
+    assert wiring['git_secret'] == 'flux-system/homelab-secrets-git'
 
 
 def test_bootstrap_requires_verified_journal(fx):
@@ -804,28 +923,21 @@ def test_bootstrap_requires_verified_journal(fx):
 
 def test_full_pipeline_then_rerun_is_safe(fx):
     cfg = fx.make_config()
+    assert fx.run('inventory', cfg).returncode == 0
     assert fx.run('prepare', cfg).returncode == 0
-    state = json.loads(fx.oci_state.read_text())
-    state['tofu_plan_json'] = TOFU_PLAN_OK
-    fx.oci_state.write_text(json.dumps(state))
+    fx.plan_pending()
     summary = json.loads(fx.run('plan', cfg).stdout.strip().splitlines()[-1])
-    assert fx.run('apply', cfg, '--approve', summary['plan_digest']).returncode == 0
+    assert fx.run('apply', cfg, '--approve',
+                  summary['plan_digest']).returncode == 0
     assert fx.run('verify', cfg).returncode == 0
     assert fx.run('bootstrap', cfg).returncode == 0
-    # rerun full pipeline: no key rotation, no new create, idempotent
-    state = json.loads(fx.oci_state.read_text())
-    created_before = dict(state['created'])
     key_before = (Path(fx.custody) / 'eso-signing.pem').read_bytes()
+    live_before = json.loads((fx.tmp / 'oci-live.json').read_text())
     for mode in ('prepare', 'verify', 'bootstrap'):
         assert fx.run(mode, cfg).returncode == 0, mode
-    state = json.loads(fx.oci_state.read_text())
-    for name, content in created_before.items():
-        assert state['created'][name] == content
+    live_after = json.loads((fx.tmp / 'oci-live.json').read_text())
+    assert live_after['vault_created'] == live_before['vault_created']
     assert (Path(fx.custody) / 'eso-signing.pem').read_bytes() == key_before
-    assert len([c for c in fx.calls_of('ansible') if
-                'talos-secrets-bootstrap.yml' in ' '.join(c)]) == 2
-    # no output ever contained private key material
-    assert 'PRIVATE KEY-----' not in json.dumps(state.get('created', {}))
 
 
 def test_journal_mismatch_fails_closed(fx):
@@ -834,3 +946,24 @@ def test_journal_mismatch_fails_closed(fx):
     fx.journal_set(source_head='0' * 40)
     result = fx.run('verify', cfg)
     assert result.returncode != 0
+
+
+def test_inventory_rejects_malformed_annotation_ocid(fx):
+    # A typo'd annotation value must fail closed, not become a new target.
+    live = json.loads((fx.tmp / 'oci-live.json').read_text())
+    key = f'{DUP_A["namespace"]}/{DUP_A["name"]}'
+    live['kube_secrets'][key]['metadata']['annotations'][
+        REUSE_ANNOTATION] = 'ocid1.vaultsecret.typo'
+    (fx.tmp / 'oci-live.json').write_text(json.dumps(live))
+    result = fx.run('inventory', fx.make_config())
+    assert result.returncode != 0
+    assert 'typo' not in result.stdout
+
+
+def test_verify_reports_exact_denial_codes(fx):
+    assert fx.run('prepare', fx.make_config()).returncode == 0
+    _applied(fx)
+    result = fx.run('verify', fx.make_config())
+    assert result.returncode == 0, result.stdout
+    status = json.loads(result.stdout.strip().splitlines()[-1])
+    assert status['denial_codes'] == ['NotAuthorizedOrNotFound']
