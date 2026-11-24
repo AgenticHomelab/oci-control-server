@@ -81,8 +81,8 @@ def test_cli_update_names_do_not_look_like_cluster_upgrades():
         actual[package] = rule["overrideDepName"]
     assert actual == expected
 
-    # Keep canonical upstream references for release lookups. The aliases
-    # affect only the Renovate PR and Dependency Dashboard display names.
+    # Keep canonical upstream references for release lookups. Aliases only
+    # affect Renovate dependency naming, never the watched or installed version.
     group_vars = (ROOT / "ansible/group_vars/all/versions.yml").read_text()
     assert "# renovate: datasource=github-tags depName=kubernetes/kubernetes" in group_vars
     assert "# renovate: datasource=github-releases depName=siderolabs/talos" in group_vars
