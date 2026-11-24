@@ -74,5 +74,13 @@
     scope: user
     daemon_reload: "{{ hermes_gateway_unit.changed }}"
     enabled: true
-    state: "{{ 'restarted' if hermes_gateway_unit.changed else 'started' }}"
+    state: >-
+      {{
+        'restarted'
+        if hermes_gateway_unit.changed
+        or (hermes_update_completed | default(false) | bool)
+        or (hermes_matrix_module_result.changed | default(false))
+        or (hermes_matrix_adapter_result.changed | default(false))
+        else 'started'
+      }}
 
