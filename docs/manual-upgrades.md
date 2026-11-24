@@ -125,7 +125,7 @@ These are not covered by the initial Renovate custom manager.
 ### Hermes Agent
 
 Renovate follows only upstream stable `vX.Y.Z` releases through
-`hermes_release_version`. The normal Hermes role does not upgrade the
+`hermes_release_version`, excluding legacy CalVer `v2026.*` tags. The normal Hermes role does not upgrade the
 installation. It checks that the installed checkout is at the exact commit
 of the reviewed local release tag. An upgrade PR **must not be merged
 ahead of the corresponding reviewed deployment** if routine host applies
