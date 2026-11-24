@@ -1,0 +1,57 @@
+---
+# Normal host reconciliation audits the reviewed Matrix overlay without
+# changing the Hermes checkout. Upgrades and overlay writes are isolated.
+- name: Require the reviewed Matrix overlay release target
+  ansible.builtin.assert:
+    that:
+      - hermes_release_version == 'v0.23.4'
+    fail_msg: Update and retest the Matrix overlay before accepting a new Hermes release.
+
+- name: Inspect installed Matrix adapter patch
+  become_user: hermes
+  ansible.builtin.stat:
+    path: /home/hermes/.hermes/matrix-overlay/adapter-v0.23.4.patch
+  register: hermes_matrix_reviewed_patch
+
+- name: Require the reviewed Matrix overlay patch file
+  ansible.builtin.assert:
+    that:
+      - hermes_matrix_reviewed_patch.stat.isreg | default(false)
+    fail_msg: Run the reviewed Hermes overlay reconcile play before normal host reconciliation.
+
+- name: Verify the adapter patch is applied
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - apply
+      - --reverse
+      - --check
+      - /home/hermes/.hermes/matrix-overlay/adapter-v0.23.4.patch
+  changed_when: false
+  check_mode: false
+
+- name: Identify the reviewed Matrix delivery code and tests
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - hash-object
+      - "{{ item }}"
+  loop:
+    - plugins/platforms/matrix/direct_key_delivery.py
+    - tests/gateway/test_matrix_direct_key_delivery.py
+  register: hermes_matrix_installed_blobs
+  changed_when: false
+  check_mode: false
+
+- name: Require exact reviewed Matrix crypto code
+  ansible.builtin.assert:
+    that:
+      - hermes_matrix_installed_blobs.results[0].stdout == '458e8012ba3b51da488d120fc4d951d7f6ced731'
+      - hermes_matrix_installed_blobs.results[1].stdout == '18c1e8b16f6e038b8ccf69f61ddd5c137d9a1fa9'
+    fail_msg: Matrix E2EE overlay differs from the reviewed source; do not change it silently.
