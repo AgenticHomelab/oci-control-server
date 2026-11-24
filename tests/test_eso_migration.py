@@ -319,9 +319,10 @@ class Fixture:
                     sid = "%(shared)s"
                 else:
                     sys.exit(1)
-                out({"data": {"secret-id": sid, "secret-name": name,
+                assert args[args.index("--stage")+1] == "CURRENT"
+                out({"data": {"secret-id": sid,
                               "version-number": 1,
-                              "version-stages": ["CURRENT"],
+                              "stages": live.get("bundle_stages", ["CURRENT", "LATEST"]),
                               "secret-bundle-content": {
                                   "content-type": "BASE64",
                                   "content": content}}})
@@ -377,12 +378,12 @@ class Fixture:
                     fp = jr.get("api_key_fingerprint") or fp
                 except (OSError, ValueError):
                     pass
-                print(json.dumps({"value": {
+                print(json.dumps({
                     "tenancy_ocid": "%(tenancy)s", "user_ocid": "%(esouser)s",
                     "group_ocid": "ocid1.group.oc1..synthgroup",
                     "api_key_fingerprint": fp,
                     "vault_ocid": "%(vault)s",
-                    "runtime_secret_ocids": []}}))
+                    "runtime_secret_ocids": []}))
                 sys.exit(0)
             sys.exit(1)
             ''' % {'tenancy': TENANCY, 'esouser': ESO_USER, 'vault': VAULT})
@@ -784,6 +785,24 @@ def test_prepare_idempotent_no_rotation_single_create(fx):
     assert live_after['vault_created'] == live_before['vault_created']
 
 
+def test_prepare_resumes_first_created_bundle_after_stage_error(fx):
+    cfg = fx.make_config()
+    fx.live_set(bundle_stages=["LATEST"])
+    result = fx.run('prepare', cfg)
+    assert result.returncode != 0
+    assert 'not CURRENT' in result.stdout
+    before = json.loads((fx.tmp / 'oci-live.json').read_text())['vault_created']
+    assert list(before) == [RUNTIME[0]['name']]
+    fx.live_set(bundle_stages=["CURRENT", "LATEST"])
+    result = fx.run('prepare', cfg)
+    assert result.returncode == 0, result.stdout
+    after = json.loads((fx.tmp / 'oci-live.json').read_text())['vault_created']
+    assert after[RUNTIME[0]['name']] == before[RUNTIME[0]['name']]
+    creates = [args for args in fx.calls_of('oci') if 'create-base64' in args]
+    assert sum(args[args.index('--secret-name')+1] == RUNTIME[0]['name']
+               for args in creates) == 1
+
+
 def test_prepare_never_overwrites_differing_vault_content(fx):
     cfg = fx.make_config()
     assert fx.run('prepare', cfg).returncode == 0
@@ -796,6 +815,7 @@ def test_prepare_never_overwrites_differing_vault_content(fx):
     (fx.tmp / 'oci-live.json').write_text(json.dumps(live))
     result = fx.run('prepare', cfg)
     assert result.returncode != 0
+    assert 'bundle differs' in result.stdout
     for stream in (result.stdout, result.stderr):
         assert 'CHANGED' not in stream
         assert 'PRIVATE KEY-----' not in stream
@@ -847,6 +867,10 @@ def test_plan_requires_prepare_journal(fx):
 def test_plan_happy_path_saves_sanitized_summary(fx):
     assert fx.run('prepare', fx.make_config()).returncode == 0
     fx.plan_pending()
+    state = json.loads(fx.oci_state.read_text())
+    state['tofu_plan_json']['resource_changes'].append(
+        {'address': 'oci_kms_vault.control[0]', 'change': {'actions': ['no-op']}})
+    fx.oci_state.write_text(json.dumps(state))
     result = fx.run('plan', fx.make_config())
     assert result.returncode == 0, result.stdout
     assert (Path(fx.custody) / 'plan.bin').read_bytes() == b'SYNTHETIC-PLAN-BYTES'
@@ -871,6 +895,21 @@ def test_plan_rejects_unrelated_change(fx):
     result = fx.run('plan', fx.make_config())
     assert result.returncode != 0
     assert 'oci_kms_vault' not in result.stdout, 'sanitized refusals only'
+
+
+def test_plan_rejects_noop_state_move(fx):
+    assert fx.run('prepare', fx.make_config()).returncode == 0
+    plan = json.loads(json.dumps(TOFU_PLAN_OK))
+    plan['resource_changes'].append({
+        'address': 'oci_kms_vault.control[0]',
+        'previous_address': 'oci_kms_vault.old[0]',
+        'change': {'actions': ['no-op']},
+    })
+    state = json.loads(fx.oci_state.read_text())
+    state['tofu_plan_json'] = plan
+    fx.oci_state.write_text(json.dumps(state))
+    result = fx.run('plan', fx.make_config())
+    assert result.returncode != 0
 
 
 def test_plan_rejects_hermes_policy_change(fx):
