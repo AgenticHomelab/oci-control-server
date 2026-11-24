@@ -148,14 +148,30 @@ ansible-playbook -i <approved-inventory> hermes-update.yml --check --diff
 ansible-playbook -i <approved-inventory> hermes-update.yml -e hermes_update_reviewed=true
 ```
 
-The isolated play verifies an official clean checkout, a stable release tag,
-the currently latest upstream stable release, and the resolved exact tag
-commit before invoking `hermes update --channel stable --yes --backup`.
-The upstream updater owns dependency changes, backup and gateway restart.
-Ansible reads the installed upstream `pm/lock.json` and refreshes systemd
-runtime PATH without maintaining duplicate Node/npm pins. It then verifies the
-expected Git commit and checks gateway/dashboard systemd units afterward. Do not separately run `hermes update` from an
-unreviewed automation job; doing so bypasses the reviewed Git release pin.
+The isolated play verifies the upstream source, reviewed stable tag and exact
+target Git commit. It accepts a **clean** checkout or only the exact identified
+legacy Matrix modification on control-01, checked against reviewed Git blob
+identities; all unexpected changes block the upgrade. This is needed for the
+first transition, because the installed source contains an opt-in Matrix E2EE
+direct-key-delivery extension. See [Matrix overlay ownership](hermes-matrix-e2ee.md).
+
+After the review gate, the play calls
+`hermes update --channel stable --yes --backup --keep-stash --no-gateway-restart`.
+The native updater owns dependency changes and full pre-update backup; its
+retained Git stash preserves the old Matrix edit and website documentation
+without implicitly reapplying them to a different upstream version.
+The dedicated Ansible play applies the reviewed Matrix adapter patch and
+source module for **v0.23.4 only**, then reads the installed `pm/lock.json`,
+refreshes systemd runtime PATH and restarts both user services on the reviewed
+new code. The normal host play checks the approved Matrix overlay without
+mutating it. If the overlay patch no longer matches the upstream release,
+stop: update the patch and run the crypto compatibility tests first.
+
+The CI `Verify Hermes Matrix E2EE compatibility` job tests the real upstream
+Hermes release with `mautrix` encryption, including an added late-index
+regression. This does not replace functional messaging checks against the
+real homeserver. Do not separately run `hermes update` from an unreviewed job;
+doing so bypasses the reviewed Git release and source overlay.
 
 If upstream publishes another stable release between the preflight and the
 native update, the updater might select it. Post-verification rejects an
