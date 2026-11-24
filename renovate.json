@@ -24,7 +24,7 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
-        "/^ansible\\/group_vars\\/control\\.yml$/"
+        "/^ansible\\/group_vars\\/all\\/versions\\.yml$/"
       ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\r?\\n(?<variable>[a-z][a-z0-9_]*):[ \\t]*\"(?<currentValue>[^\"]+)\""
