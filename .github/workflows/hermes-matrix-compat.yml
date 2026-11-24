@@ -1,0 +1,58 @@
+name: Verify Hermes Matrix E2EE compatibility
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ansible/group_vars/all/versions.yml
+      - ansible/roles/hermes/files/matrix/**
+      - ansible/roles/hermes/tasks/matrix-overlay.yml
+      - .github/workflows/hermes-matrix-compat.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-crypto:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - name: Fetch exactly the reviewed stable Hermes release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^hermes_release_version: "\(v[^"]*\)"/\1/p' ansible/group_vars/all/versions.yml)"
+          [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git clone --depth 1 --branch "$version" \
+            https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent"
+          test "$(git -C "$RUNNER_TEMP/hermes-agent" describe --tags --exact-match)" = "$version"
+      - name: Verify adapter patch against upstream release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/hermes-agent"
+          git apply --check "$GITHUB_WORKSPACE/ansible/roles/hermes/files/matrix/adapter-v0.23.4.patch"
+          git apply "$GITHUB_WORKSPACE/ansible/roles/hermes/files/matrix/adapter-v0.23.4.patch"
+          cp "$GITHUB_WORKSPACE/ansible/roles/hermes/files/matrix/direct_key_delivery.py" \
+             plugins/platforms/matrix/direct_key_delivery.py
+          cp "$GITHUB_WORKSPACE/ansible/roles/hermes/files/matrix/test_matrix_direct_key_delivery.py" \
+             tests/gateway/test_matrix_direct_key_delivery.py
+      - name: Install native Matrix encryption and test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -e "$RUNNER_TEMP/hermes-agent[matrix]" pytest pytest-asyncio
+          python -c 'import mautrix.crypto, olm'
+      - name: Run the preserved and added Matrix crypto regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/hermes-agent"
+          python -m pytest -q tests/gateway/test_matrix_direct_key_delivery.py
