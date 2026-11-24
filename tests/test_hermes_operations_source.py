@@ -88,3 +88,51 @@ def test_native_dispatch_and_key_renewal_remain_opt_in():
     assert "AgenticHomelab/talos-cluster" in (
         ROLE / "files/talos-renovate-dispatch.service"
     ).read_text()
+
+def test_hermes_release_update_is_isolated_and_not_automatic():
+    upgrade = yaml.safe_load((ANSIBLE / "hermes-update.yml").read_text())
+    assert len(upgrade) == 1
+    assert upgrade[0]["hosts"] == "control"
+    tasks = upgrade[0]["tasks"]
+    assert len(tasks) == 1
+    assert tasks[0]["ansible.builtin.import_role"] == {
+        "name": "hermes",
+        "tasks_from": "release-update",
+    }
+    normal = (ROLE / "tasks/main.yml").read_text()
+    main = (ANSIBLE / "playbook.yml").read_text()
+    assert "release-update" not in normal
+    assert "release-update" not in main
+    assert "release-verify.yml" in normal
+    assert "hermes_install_commit" not in normal
+
+    update_tasks = yaml.safe_load(
+        (ROLE / "tasks/release-update.yml").read_text()
+    )
+    commands = [
+        task["ansible.builtin.command"]["argv"]
+        for task in update_tasks
+        if "ansible.builtin.command" in task
+    ]
+    assert any("update" in argv and "--plan" in argv for argv in commands)
+    assert any(
+        "update" in argv and "--channel" in argv
+        and "stable" in argv and "--backup" in argv
+        for argv in commands
+    )
+    approval = next(
+        task for task in update_tasks
+        if task["name"].startswith("Require explicit approval")
+    )
+    assert "hermes_update_reviewed" in str(approval)
+    mutation = next(
+        task for task in update_tasks
+        if task["name"].startswith("Run Hermes upstream stable updater")
+    )
+    assert "not ansible_check_mode" in mutation["when"]
+    assert mutation["become_user"] == "hermes"
+    assert mutation["async"] > 0
+
+    verify = (ROLE / "tasks/release-verify.yml").read_text()
+    assert "refs/tags/{{ hermes_release_version }}^{commit}" in verify
+    assert "hermes_installed_revision.stdout" in verify
