@@ -84,22 +84,6 @@
   check_mode: false
   when: hermes_checkout_status.stdout | trim != ''
 
-- name: Refuse altered or unreviewed legacy Matrix source
-  ansible.builtin.assert:
-    that:
-      - hermes_legacy_patch_blobs.results[1].stdout == '458e8012ba3b51da488d120fc4d951d7f6ced731'
-      - >-
-        ((hermes_checkout_status.stdout_lines | length) == 4 and
-         hermes_legacy_patch_blobs.results[0].stdout is match('^a7d53d905f[0-9a-f]{30}$') and
-         hermes_legacy_patch_blobs.results[2].stdout == '9f0165578dc9cf1de32768e060ae24d140dd4983') or
-        ((hermes_checkout_status.stdout_lines | length) == 3 and
-         hermes_legacy_patch_blobs.results[0].stdout == '6fa778e1cfbf584f950b627be633a08fbd10a841' and
-         hermes_legacy_patch_blobs.results[2].stdout == '18c1e8b16f6e038b8ccf69f61ddd5c137d9a1fa9')
-    fail_msg: >-
-      The legacy Matrix customization differs from the reviewed source.
-      Preserve and inspect the exact changes before any upgrade.
-  when: hermes_checkout_status.stdout | trim != ''
-
 - name: Read current Hermes checkout revision
   become_user: hermes
   ansible.builtin.command:
@@ -112,6 +96,28 @@
   register: hermes_before_sha
   changed_when: false
   check_mode: false
+
+- name: Refuse altered or unreviewed legacy Matrix source
+  ansible.builtin.assert:
+    that:
+      - hermes_legacy_patch_blobs.results[1].stdout == '458e8012ba3b51da488d120fc4d951d7f6ced731'
+      - >-
+        ((hermes_checkout_status.stdout_lines | length) == 4 and
+         hermes_before_sha.stdout | trim == '4e3fcd5cd7e40c37cb6f9a21a76fc57a7361957a' and
+         hermes_legacy_patch_blobs.results[0].stdout is match('^a7d53d905f[0-9a-f]{30}$') and
+         hermes_legacy_patch_blobs.results[2].stdout == '9f0165578dc9cf1de32768e060ae24d140dd4983') or
+        ((hermes_checkout_status.stdout_lines | length) == 3 and
+         hermes_before_sha.stdout | trim == 'e06df9c2eae6901f4c88f464e0ae6e753c0428b8' and
+         hermes_legacy_patch_blobs.results[0].stdout == '628f08c69a53c66b123489471fa459125f6ec57e' and
+         hermes_legacy_patch_blobs.results[2].stdout == '18c1e8b16f6e038b8ccf69f61ddd5c137d9a1fa9') or
+        ((hermes_checkout_status.stdout_lines | length) == 3 and
+         hermes_before_sha.stdout | trim == '8fc0374447313e276f6b9a2764bfc750190c966a' and
+         hermes_legacy_patch_blobs.results[0].stdout == '6fa778e1cfbf584f950b627be633a08fbd10a841' and
+         hermes_legacy_patch_blobs.results[2].stdout == '18c1e8b16f6e038b8ccf69f61ddd5c137d9a1fa9')
+    fail_msg: >-
+      The legacy Matrix customization differs from the reviewed source.
+      Preserve and inspect the exact changes before any upgrade.
+  when: hermes_checkout_status.stdout | trim != ''
 
 - name: Look up the latest published stable Hermes release
   ansible.builtin.uri:
