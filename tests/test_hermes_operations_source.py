@@ -153,3 +153,46 @@ def test_hermes_runtime_comes_from_upstream_pm_lock():
     assert "hermes_pm_runtime.packages.npm.version" in gateway
     assert "hermes_node_version:" not in vars_file
     assert "hermes_npm_version:" not in vars_file
+
+
+def test_matrix_e2ee_source_overlay_is_reviewed_and_kept_out_of_normal_updates():
+    import ast
+    import hashlib
+
+    files = ROLE / "files/matrix"
+    module = files / "direct_key_delivery.py"
+    regressions = files / "test_matrix_direct_key_delivery.py"
+
+    def blob_sha(path):
+        source = path.read_bytes()
+        return hashlib.sha1(
+            b"blob " + str(len(source)).encode() + b"\\0" + source,
+            usedforsecurity=False,
+        ).hexdigest()
+
+    assert blob_sha(module) == "458e8012ba3b51da488d120fc4d951d7f6ced731"
+    assert blob_sha(regressions) == "18c1e8b16f6e038b8ccf69f61ddd5c137d9a1fa9"
+    ast.parse(module.read_text())
+    ast.parse(regressions.read_text())
+    assert "test_late_device_receives_current_index_without_history" in regressions.read_text()
+
+    patch = (files / "adapter-v0.23.4.patch").read_text()
+    assert "from plugins.platforms.matrix.adapter_crypto import _CryptoStateStore" in patch
+    assert "+                olm = DirectKeyDeliveryMachine" in patch
+    assert "-            olm = OlmMachine" in patch
+
+    normal = (ROLE / "tasks/main.yml").read_text()
+    upgrade = (ROLE / "tasks/release-update.yml").read_text()
+    overlay = (ROLE / "tasks/matrix-overlay.yml").read_text()
+    audit = (ROLE / "tasks/matrix-overlay-verify.yml").read_text()
+    assert "import_tasks: matrix-overlay-verify.yml" in normal
+    assert "import_tasks: matrix-overlay.yml" in upgrade
+    assert "--keep-stash" in upgrade
+    assert "--no-gateway-restart" in upgrade
+    assert "hermes_legacy_patch_blobs" in upgrade
+    assert "a7d53d905f" in upgrade
+    assert "ansible.builtin.copy" in overlay
+    assert "ansible.builtin.command" in overlay
+    assert "apply" in overlay
+    assert "apply" in audit
+    assert "ansible.builtin.copy" not in audit
