@@ -9,7 +9,7 @@ No second runner, automatic deployment, or unattended container updater exists.
 
 `renovate.json` creates review-only PRs with a Dependency Dashboard. It watches:
 
-- Omni and Dex image tags in `ansible/group_vars/control.yml`;
+- Omni and Dex image tags in `ansible/group_vars/all/versions.yml`;
 - kubectl, talosctl, Flux CLI and Helm version pins in that file;
 - GitHub Actions SHA references; and
 - OpenTofu provider constraints and lockfile through Renovate's Terraform manager
