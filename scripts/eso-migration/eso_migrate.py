@@ -15,6 +15,7 @@ Modes, in operator order:
              groups, and reuse entries derived from the
              k0ti.com/oci-vault-secret annotation plus operator
              reuse_hints. Prints a sanitized summary only.
+  vault-status  List reviewed Vault target metadata (counts and states only).
   prepare    Verify the original git workspace, S3 backend lineage
              (use_lockfile=true, default workspace), and the independent
              operator OCI API-key identity (matching root tenancy and
@@ -167,19 +168,35 @@ def _child_env():
     return {k: v for k, v in os.environ.items() if k in allowed}
 
 
-def command(argv, payload=None, timeout=600):
+def native_failure(operation, reason, stderr=''):
+    # Never include argv, paths, response messages or arbitrary error codes.
+    code = _denial_payload_code(stderr)
+    allowed = DENIAL_CODES | {
+        'InvalidParameter', 'MissingParameter', 'LimitExceeded',
+        'TooManyRequests', 'Conflict', 'IncorrectState', 'NotFound',
+        'InternalServerError', 'ServiceUnavailable', 'InvalidRequest',
+    }
+    detail = '; OCI code ' + code if code in allowed else ''
+    return Fail(f'{E_STATE} ({operation}; {reason}{detail})')
+
+
+def command(argv, payload=None, timeout=600, operation='native tool'):
     """Run a native tool with a minimal environment; suppress all output.
 
     Never inherits OCI_* auth/endpoint/debug overrides. Returns stdout only
-    on success; any failure is the sanitized E_STATE message.
+    on success; failures include only the static operation and safe status.
     """
     try:
         result = subprocess.run(argv, input=payload, text=True,
                                 capture_output=True, env=_child_env(),
                                 timeout=timeout, check=False)
-    except (OSError, subprocess.TimeoutExpired):
-        raise Fail(E_STATE) from None
-    require(result.returncode == 0, E_STATE)
+    except subprocess.TimeoutExpired:
+        raise native_failure(operation, 'timeout') from None
+    except OSError:
+        raise native_failure(operation, 'execution failed') from None
+    if result.returncode != 0:
+        raise native_failure(operation, f'exit {result.returncode}',
+                             result.stderr)
     return result.stdout
 
 
@@ -400,13 +417,13 @@ def check_tool(cfg, name):
 
 def git(cfg, *args):
     return command([cfg['tools']['git'], '-C', cfg['workspace'], *args],
-                   timeout=120)
+                   timeout=120, operation='git ' + args[0])
 
 
 def kubectl(cfg, *args):
     argv = [cfg['tools']['kubectl'], '--kubeconfig', cfg['kubeconfig'],
             '--context', cfg['context'], *args]
-    return command(argv, timeout=120)
+    return command(argv, timeout=120, operation='kubectl get')
 
 
 def verify_workspace(cfg):
@@ -477,7 +494,12 @@ def oci(cfg, op_profile, *args, payload=None, timeout=300):
             '--region', op_profile['region'], '--cli-rc-file', '/dev/null',
             '--output', 'json', '--no-retry', '--connection-timeout', '10',
             '--read-timeout', '60', *args]
-    return command(argv, payload=payload, timeout=timeout)
+    # Service and operation words precede all selector flags. All callers
+    # supply these words as fixed literals; never include flag values.
+    operation = 'oci ' + ' '.join(args[:next(
+        (i for i, arg in enumerate(args) if arg.startswith('--')), len(args))])
+    return command(argv, payload=payload, timeout=timeout,
+                   operation=operation)
 
 
 def oci_raw(cfg, op_profile, *args, timeout=300):
@@ -493,7 +515,11 @@ def oci_raw(cfg, op_profile, *args, timeout=300):
 def _denial_payload_code(stderr):
     """The parsed error code string from the CLI stderr, or None."""
     try:
-        payload = json.loads(stderr or '')
+        # Real OCI CLI prefixes its JSON with "ServiceError:".
+        raw = (stderr or '').strip()
+        if raw.startswith('ServiceError:'):
+            raw = raw[len('ServiceError:'):].lstrip()
+        payload = json.loads(raw)
     except (ValueError, TypeError, UnicodeError):
         return None
     if not isinstance(payload, dict):
@@ -592,7 +618,7 @@ def ensure_signing_key(cfg):
         return key_path.read_text(encoding='utf-8')
     check_tool(cfg, 'openssl')
     pem = command([cfg['tools']['openssl'], 'genrsa', '-out',
-                   str(key_path) + '.tmp', '4096'])
+                   str(key_path) + '.tmp', '4096'], operation='openssl genrsa')
     tmp = Path(str(key_path) + '.tmp')
     require(tmp.is_file(), E_KEY)
     os.chmod(tmp, 0o600)
@@ -614,7 +640,7 @@ def public_pem(cfg, private_pem):
     check_tool(cfg, 'openssl')
     pub_path = custody / 'eso-signing.pub'
     command([cfg['tools']['openssl'], 'rsa', '-in', str(key_path),
-             '-pubout', '-out', str(pub_path) + '.tmp'])
+             '-pubout', '-out', str(pub_path) + '.tmp'], operation='openssl rsa')
     tmp = Path(str(pub_path) + '.tmp')
     os.chmod(tmp, 0o600)
     tmp.replace(pub_path)
@@ -645,7 +671,8 @@ def key_fingerprint(cfg, custody, key_path):
     with tempfile.TemporaryDirectory(dir=str(custody)) as td:
         der_path = Path(td) / 'pub.der'
         command([cfg['tools']['openssl'], 'rsa', '-in', str(key_path),
-                 '-pubout', '-outform', 'DER', '-out', str(der_path)])
+                 '-pubout', '-outform', 'DER', '-out', str(der_path)],
+                operation='openssl rsa')
         der = der_path.read_bytes()
     digest = hashlib.sha1(der).hexdigest()
     return ':'.join(digest[i:i + 2] for i in range(0, 40, 2))
@@ -710,9 +737,13 @@ def vault_create_or_reuse_equal(cfg, op_profile, inv, name, payload_text,
     existing = oci_vault_list(cfg, op_profile, vault,
                               inv['compartment_ocid'], name)
     if existing:
+        require(len(existing) == 1, E_VAULT)
+        require(existing[0].get('lifecycle-state') == 'ACTIVE',
+                'existing Vault secret is not ACTIVE; inspect vault-status')
         bundle = oci_vault_bundle_by_name(cfg, op_profile, vault, name)
         stages = bundle.get('version-stages') or []
-        require('CURRENT' in stages, E_VAULT)
+        require('CURRENT' in stages and bundle.get('secret-id') == existing[0]['id'],
+                E_VAULT)
         require(bundle.get('secret-bundle-content', {}).get('content-type')
                 == 'BASE64', E_VAULT)
         existing_content = bundle['secret-bundle-content'].get('content', '')
@@ -722,23 +753,28 @@ def vault_create_or_reuse_equal(cfg, op_profile, inv, name, payload_text,
     # Absent: create exactly once. Content travels via a protected temp file.
     import tempfile
     with tempfile.TemporaryDirectory(dir=str(custody)) as td:
-        content_path = Path(td) / 'content.b64'
-        content_path.write_text(content)
-        os.chmod(content_path, 0o600)
+        content_path = write_protected(Path(td) / 'content.json',
+                                       json.dumps({'secretContentContent': content}))
         created = parse_native_json(oci(
             cfg, op_profile, 'vault', 'secret', 'create-base64',
             '--vault-id', vault, '--compartment-id', inv['compartment_ocid'],
             '--key-id', cfg['expected']['vault_key_ocid'],
             '--secret-name', name,
-            '--secret-content-content-file', str(content_path),
-            '--description', description))
+            '--from-json', 'file://' + str(content_path),
+            '--description', description,
+            '--wait-for-state', 'ACTIVE', '--max-wait-seconds', '240',
+            '--wait-interval-seconds', '5', timeout=360))
     secret_ocid = ((created or {}).get('data') or {}).get('id')
     require(isinstance(secret_ocid, str) and OCID.match(secret_ocid),
             E_VAULT)
     bundle = oci_vault_bundle_by_name(cfg, op_profile, vault, name)
     version = bundle.get('version-number')
     require(isinstance(version, int) and version >= 1, E_VAULT)
-    require('CURRENT' in (bundle.get('version-stages') or []), E_VAULT)
+    require('CURRENT' in (bundle.get('version-stages') or [])
+            and bundle.get('secret-id') == secret_ocid
+            and bundle.get('secret-bundle-content', {}).get('content-type') == 'BASE64'
+            and bundle.get('secret-bundle-content', {}).get('content') == content,
+            E_VAULT)
     return {'secret_ocid': secret_ocid, 'version_number': version}
 
 
@@ -1059,6 +1095,39 @@ def emit(payload):
     print(json.dumps(payload))
 
 
+def mode_vault_status(cfg, args=None):
+    """Read only metadata for the reviewed inventory, emit counts only."""
+    inv = load_inventory(cfg['inventory'], cfg)
+    profile = operator_profile(cfg)
+    verify_operator_identity(cfg, profile)
+    data = parse_native_json(oci(
+        cfg, profile, 'vault', 'secret', 'list',
+        '--vault-id', cfg['expected']['vault_ocid'],
+        '--compartment-id', inv['compartment_ocid'], '--all'))
+    rows = (data or {}).get('data')
+    require(isinstance(rows, list), E_STATE)
+    states = {'ACTIVE', 'CREATING', 'FAILED', 'UPDATING', 'DELETED',
+              'DELETING', 'PENDING_DELETION', 'SCHEDULING_DELETION',
+              'CANCELLING_DELETION'}
+
+    def summary(expected, field):
+        found = {}
+        for row in rows:
+            if row.get(field) in expected:
+                state = row.get('lifecycle-state')
+                state = state if state in states else 'UNKNOWN'
+                found[state] = found.get(state, 0) + 1
+        return {'expected': len(expected), 'found': sum(found.values()),
+                'states': found}
+
+    emit({'ok': True, 'mode': 'vault-status',
+          'runtime': summary({t['name'] for t in inv['runtime_targets']},
+                             'secret-name'),
+          'bootstrap': summary({inv['flux_bundle']['name'],
+                                inv['eso_bundle']['name']}, 'secret-name'),
+          'reuse': summary({e['ocid'] for e in inv['reuse_entries']}, 'id')})
+
+
 def mode_prepare(cfg, args=None):
     inv = load_inventory(cfg['inventory'], cfg)
     head = verify_workspace(cfg)
@@ -1122,7 +1191,7 @@ def mode_prepare(cfg, args=None):
 
 def tofu(cfg, *args, payload=None):
     return command([cfg['tools']['tofu'], '-chdir=terraform', *args],
-                   payload=payload)
+                   payload=payload, operation='tofu ' + args[0])
 
 
 def mode_plan(cfg, args=None):
@@ -1297,13 +1366,15 @@ def mode_bootstrap(cfg, args=None):
     play = Path(cfg['workspace']) / 'ansible' / 'talos-secrets-bootstrap.yml'
     require(play.is_file(), E_BOOTSTRAP)
     command([cfg['tools']['ansible_playbook'], '-i', 'localhost,', str(play),
-             '--extra-vars', '@' + str(extra_vars)], timeout=1800)
+             '--extra-vars', '@' + str(extra_vars)], timeout=1800,
+            operation='ansible-playbook bootstrap')
     emit({'ok': True, 'mode': 'bootstrap',
           'auth_secret': journal['kubernetes']['auth_secret'],
           'git_secret': journal['kubernetes']['git_secret']})
 
 
-MODES = {'inventory': mode_inventory, 'prepare': mode_prepare,
+MODES = {'inventory': mode_inventory, 'vault-status': mode_vault_status,
+         'prepare': mode_prepare,
          'plan': mode_plan, 'apply': mode_apply,
          'verify': mode_verify, 'bootstrap': mode_bootstrap}
 
