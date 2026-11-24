@@ -55,14 +55,16 @@ def test_hermes_uses_only_stable_release_tags():
         if "NousResearch/hermes-agent" in rule.get("matchPackageNames", [])
     ]
     assert len(rules) == 1
-    assert rules[0]["allowedVersions"] == "/^v\\d+\\.\\d+\\.\\d+$/"
+    assert rules[0]["allowedVersions"] == "/^v(?:0|[1-9][0-9]{0,2})\\.[0-9]+\\.[0-9]+$/"
     assert rules[0]["matchFileNames"] == [
         "ansible/group_vars/all/versions.yml"
     ]
     values = yaml.safe_load(
         (ROOT / "ansible/group_vars/all/versions.yml").read_text()
     )
-    assert re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", values["hermes_release_version"])
+    stable = r"v(?:0|[1-9][0-9]{0,2})\.[0-9]+\.[0-9]+"
+    assert re.fullmatch(stable, values["hermes_release_version"])
+    assert re.fullmatch(stable, "v2026.9.24") is None
     assert "hermes_install_commit:" not in (
         ROOT / "ansible/group_vars/control.yml"
     ).read_text()
