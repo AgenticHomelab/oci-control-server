@@ -255,25 +255,6 @@
   ansible.builtin.import_tasks: runtime-units.yml
   when: not ansible_check_mode
 
-- name: Restart Hermes services on the reviewed code and Matrix overlay
-  become_user: hermes
-  environment:
-    XDG_RUNTIME_DIR: "/run/user/{{ hermes_upgrade_uid.stdout | trim }}"
-  ansible.builtin.systemd_service:
-    name: "{{ item }}"
-    scope: user
-    state: restarted
-  loop:
-    - hermes-gateway.service
-    - hermes-dashboard.service
-  when:
-    - not ansible_check_mode
-    - >-
-      (hermes_before_sha.stdout | trim != hermes_expected_sha) or
-      (hermes_matrix_module_result.changed | default(false)) or
-      (hermes_matrix_adapter_result.changed | default(false)) or
-      (hermes_matrix_test_result.changed | default(false))
-
 - name: Require Hermes gateway and dashboard services active
   become_user: hermes
   environment:
