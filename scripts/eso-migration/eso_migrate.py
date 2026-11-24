@@ -527,15 +527,23 @@ def verify_operator_identity(cfg, op_profile):
         cfg, op_profile, 'iam', 'user', 'get',
         '--user-id', cfg['expected']['operator_user_ocid']))
     user = ((data or {}).get('data') or {})
-    require(user.get('tenancy-id') == cfg['expected']['tenancy_ocid']
-            and user.get('compartment-id') == cfg['expected']['compartment_ocid'],
+    expected = cfg['expected']
+    # OCI IAM User.compartment-id is the root tenancy, not the Vault's
+    # resource compartment. The User model has no tenancy-id field.
+    require(user.get('id') == expected['operator_user_ocid']
+            and user.get('compartment-id') == expected['tenancy_ocid'],
             E_IDENTITY)
-    data = parse_native_json(oci(
-        cfg, op_profile, 'iam', 'compartment', 'get',
-        '--compartment-id', cfg['expected']['compartment_ocid']))
+    compartment_id = expected['compartment_ocid']
+    if compartment_id == expected['tenancy_ocid']:
+        data = parse_native_json(oci(
+            cfg, op_profile, 'iam', 'tenancy', 'get',
+            '--tenancy-id', compartment_id))
+    else:
+        data = parse_native_json(oci(
+            cfg, op_profile, 'iam', 'compartment', 'get',
+            '--compartment-id', compartment_id))
     compartment = ((data or {}).get('data') or {})
-    require(compartment.get('id') == cfg['expected']['compartment_ocid'],
-            E_IDENTITY)
+    require(compartment.get('id') == compartment_id, E_IDENTITY)
 
 
 # =====================================================================

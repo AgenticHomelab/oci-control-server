@@ -347,10 +347,10 @@
         }
       ],
       "git_blob_prefix_segments": [
-        "1e07",
-        "7224",
-        "acdf",
-        "5c92"
+        "29e4",
+        "ce34",
+        "55a4",
+        "7b2d"
       ]
     },
     "tests/test_eso_migration.py": {
@@ -374,22 +374,22 @@
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 687
+          "line": 712
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 833
+          "line": 858
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 850
+          "line": 875
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 920
+          "line": 945
         },
         {
           "tool": "gitleaks",
@@ -398,10 +398,10 @@
         }
       ],
       "git_blob_prefix_segments": [
-        "d0b0",
-        "3e92",
-        "f6c7",
-        "b614"
+        "e62e",
+        "ca27",
+        "0585",
+        "3985"
       ]
     },
     "scripts/eso-migration/eso_migrate.py": {
@@ -415,12 +415,12 @@
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 1083
+          "line": 1091
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 1084
+          "line": 1092
         },
         {
           "tool": "gitleaks",
@@ -429,30 +429,30 @@
         }
       ],
       "git_blob_prefix_segments": [
-        "f931",
-        "3cd9",
-        "e420",
-        "13a8"
+        "98b5",
+        "cc89",
+        "e445",
+        "6391"
       ]
     },
     "ansible/roles/talos_secrets_bootstrap/files/bootstrap.py": {
       "reason": "Sanitized helper: profile/selector validation literals; no credential values",
       "findings": [],
       "git_blob_prefix_segments": [
-        "0e67",
-        "df97",
-        "dcd5",
-        "31da"
+        "b940",
+        "d332",
+        "22a6",
+        "ad4f"
       ]
     },
     "docs/eso-migration-runbook.md": {
       "reason": "Command/selector names in operator documentation; no credential values",
       "findings": [],
       "git_blob_prefix_segments": [
-        "066c",
-        "42a6",
-        "9a69",
-        "09c3"
+        "1074",
+        "0163",
+        "4fc8",
+        "efe8"
       ]
     }
   }
