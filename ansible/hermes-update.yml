@@ -1,0 +1,11 @@
+---
+# Explicit, operator-initiated Hermes source upgrade only. No normal host roles.
+- name: Update Hermes to the reviewed stable release
+  hosts: control
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Run the dedicated Hermes release upgrade
+      ansible.builtin.import_role:
+        name: hermes
+        tasks_from: release-update

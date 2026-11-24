@@ -1,0 +1,86 @@
+---
+# Read runtime pins from the installed upstream release. They are owned by
+# Hermes PM, not separately versioned Ansible variables.
+- name: Read installed Hermes package manager runtime lock
+  ansible.builtin.slurp:
+    src: /home/hermes/.hermes/hermes-agent/pm/lock.json
+  register: hermes_pm_lock_contents
+
+- name: Parse Hermes-owned runtime versions
+  ansible.builtin.set_fact:
+    hermes_pm_runtime: "{{ hermes_pm_lock_contents.content | b64decode | from_json }}"
+
+- name: Require supported Hermes runtime lock entries
+  ansible.builtin.assert:
+    that:
+      - hermes_pm_runtime.packages.node.version is match('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+      - hermes_pm_runtime.packages.npm.version is match('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+    fail_msg: Installed Hermes PM lock no longer has the expected Node/npm layout.
+
+- name: Install Hermes dashboard systemd service
+  tags: [hermes_dashboard_credentials]
+  ansible.builtin.template:
+    src: hermes-dashboard.service.j2
+    dest: /home/hermes/.config/systemd/user/hermes-dashboard.service
+    owner: hermes
+    group: hermes
+    mode: "0644"
+  register: hermes_dashboard_unit
+
+- name: Install Hermes gateway systemd service
+  ansible.builtin.template:
+    src: hermes-gateway.service.j2
+    dest: /home/hermes/.config/systemd/user/hermes-gateway.service
+    owner: hermes
+    group: hermes
+    mode: "0644"
+  register: hermes_gateway_unit
+
+- name: Get Hermes user ID
+  tags: [hermes_dashboard_credentials]
+  ansible.builtin.command:
+    cmd: id -u hermes
+  register: hermes_uid
+  changed_when: false
+  check_mode: false
+
+- name: Enable and start Hermes dashboard
+  tags: [hermes_dashboard_credentials]
+  become_user: hermes
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_uid.stdout | trim }}"
+  ansible.builtin.systemd_service:
+    name: hermes-dashboard.service
+    scope: user
+    daemon_reload: true
+    enabled: true
+    state: >-
+      {{
+        'restarted'
+        if (hermes_dashboard_env.changed | default(false))
+        or (hermes_dashboard_vault_refresh.changed | default(false))
+        or (hermes_update_completed | default(false) | bool)
+        or hermes_dashboard_unit.changed
+        else 'started'
+      }}
+
+- name: Enable and start Hermes gateway
+  become: true
+  become_user: hermes
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_uid.stdout | trim }}"
+  ansible.builtin.systemd_service:
+    name: hermes-gateway.service
+    scope: user
+    daemon_reload: "{{ hermes_gateway_unit.changed }}"
+    enabled: true
+    state: >-
+      {{
+        'restarted'
+        if hermes_gateway_unit.changed
+        or (hermes_update_completed | default(false) | bool)
+        or (hermes_matrix_module_result.changed | default(false))
+        or (hermes_matrix_adapter_result.changed | default(false))
+        else 'started'
+      }}
+

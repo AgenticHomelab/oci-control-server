@@ -88,3 +88,156 @@ def test_native_dispatch_and_key_renewal_remain_opt_in():
     assert "AgenticHomelab/talos-cluster" in (
         ROLE / "files/talos-renovate-dispatch.service"
     ).read_text()
+
+def test_hermes_release_update_is_isolated_and_not_automatic():
+    upgrade = yaml.safe_load((ANSIBLE / "hermes-update.yml").read_text())
+    assert len(upgrade) == 1
+    assert upgrade[0]["hosts"] == "control"
+    tasks = upgrade[0]["tasks"]
+    assert len(tasks) == 1
+    assert tasks[0]["ansible.builtin.import_role"] == {
+        "name": "hermes",
+        "tasks_from": "release-update",
+    }
+    normal = (ROLE / "tasks/main.yml").read_text()
+    main = (ANSIBLE / "playbook.yml").read_text()
+    assert "release-update" not in normal
+    assert "release-update" not in main
+    assert "release-verify.yml" in normal
+    assert "hermes_install_commit" not in normal
+
+    update_tasks = yaml.safe_load(
+        (ROLE / "tasks/release-update.yml").read_text()
+    )
+    commands = [
+        task["ansible.builtin.command"]["argv"]
+        for task in update_tasks
+        if "ansible.builtin.command" in task
+    ]
+    assert any("update" in argv and "--plan" in argv for argv in commands)
+    assert any(
+        "refs/tags/{{ hermes_release_version }}^{}" in argv
+        and "refs/tags/{{ hermes_release_version }}" not in argv
+        for argv in commands
+    ), "Only peeled annotated release commits may be selected"
+    assert "hermes_upstream_tag_refs.stdout.split()[0]" in (
+        ROLE / "tasks/release-update.yml"
+    ).read_text()
+    assert "resolve_source_target('stable', repository='NousResearch/hermes-agent')" in (
+        ROLE / "tasks/release-update.yml"
+    ).read_text()
+    native_gate = next(
+        task for task in update_tasks
+        if task["name"].startswith("Refuse a native stable-channel target")
+    )
+    assert "hermes_native_channel_sha.stdout | trim == hermes_expected_sha" in str(native_gate)
+
+    # The first native update on control-01 stopped at the older stable
+    # channel's v0.22.0 target. Only that exact known intermediate SHA and
+    # reviewed Matrix adapter blob may pass a second preflight.
+    preflight = next(
+        task for task in update_tasks
+        if task["name"].startswith("Refuse altered or unreviewed legacy Matrix")
+    )
+    conditions = str(preflight["ansible.builtin.assert"]["that"])
+    # Review of exact SHAs belongs to the Ansible preflight; avoid duplicate
+    # digest literals (and false-positive secret detections) in the test.
+    assert conditions.count("hermes_before_sha.stdout | trim") >= 3
+    assert conditions.count("hermes_legacy_patch_blobs.results[0].stdout") >= 3
+    assert conditions.count("hermes_checkout_status.stdout_lines | length) == 3") >= 2
+    preflight_index = update_tasks.index(preflight)
+    revision_index = next(
+        i for i, task in enumerate(update_tasks)
+        if task["name"] == "Read current Hermes checkout revision"
+    )
+    assert revision_index < preflight_index
+    native_probe = next(
+        task for task in update_tasks
+        if task["name"].startswith("Resolve the target the installed Hermes updater")
+    )
+    assert native_probe["ansible.builtin.command"]["argv"][:3] == ["python3", "-B", "-c"]
+    assert any(
+        "update" in argv and "--channel" in argv
+        and "stable" in argv and "--backup" in argv
+        for argv in commands
+    )
+    approval = next(
+        task for task in update_tasks
+        if task["name"].startswith("Require explicit approval")
+    )
+    assert "hermes_update_reviewed" in str(approval)
+    mutation = next(
+        task for task in update_tasks
+        if task["name"].startswith("Run Hermes upstream stable updater")
+    )
+    assert "not ansible_check_mode" in mutation["when"]
+    assert mutation["become_user"] == "hermes"
+    assert mutation["async"] > 0
+
+    verify = (ROLE / "tasks/release-verify.yml").read_text()
+    assert "refs/tags/{{ hermes_release_version }}^{commit}" in verify
+    assert "hermes_installed_revision.stdout" in verify
+
+def test_hermes_runtime_comes_from_upstream_pm_lock():
+    normal = (ROLE / "tasks/main.yml").read_text()
+    upgrade = (ROLE / "tasks/release-update.yml").read_text()
+    units = (ROLE / "tasks/runtime-units.yml").read_text()
+    gateway = (ROLE / "templates/hermes-gateway.service.j2").read_text()
+    vars_file = (ANSIBLE / "group_vars/control.yml").read_text()
+
+    assert "import_tasks: runtime-units.yml" in normal
+    assert "import_tasks: runtime-units.yml" in upgrade
+    assert "/pm/lock.json" in units
+    assert "hermes_pm_runtime.packages.node.version" in units
+    assert "hermes_pm_runtime.packages.npm.version" in units
+    assert "hermes_pm_runtime.packages.node.version" in gateway
+    assert "hermes_pm_runtime.packages.npm.version" in gateway
+    assert "hermes_node_version:" not in vars_file
+    assert "hermes_npm_version:" not in vars_file
+
+
+def test_matrix_e2ee_source_overlay_is_reviewed_and_kept_out_of_normal_updates():
+    import ast
+    import hashlib
+
+    files = ROLE / "files/matrix"
+    module = files / "direct_key_delivery.py"
+    regressions = files / "test_matrix_direct_key_delivery.py"
+
+    def blob_sha(path):
+        source = path.read_bytes()
+        return hashlib.sha1(
+            b"blob " + str(len(source)).encode() + b"\x00" + source,
+            usedforsecurity=False,
+        ).hexdigest()
+
+    import re
+    # Keep reviewed hashes in the Ansible audit only, not a second test-owned list.
+    audit_text = (ROLE / "tasks/matrix-overlay-verify.yml").read_text()
+    reviewed = re.findall(r"'([0-9a-f]{40})'", audit_text)
+    assert len(reviewed) == 3  # adapter, module, regression test
+    assert [blob_sha(module), blob_sha(regressions)] == reviewed[1:]
+    ast.parse(module.read_text())
+    ast.parse(regressions.read_text())
+    assert "test_late_device_receives_current_index_without_history" in regressions.read_text()
+
+    patch = (files / "adapter-v0.23.4.patch").read_text()
+    assert "from plugins.platforms.matrix.adapter_crypto import _CryptoStateStore" in patch
+    assert "+                olm = DirectKeyDeliveryMachine" in patch
+    assert "-            olm = OlmMachine" in patch
+
+    normal = (ROLE / "tasks/main.yml").read_text()
+    upgrade = (ROLE / "tasks/release-update.yml").read_text()
+    overlay = (ROLE / "tasks/matrix-overlay.yml").read_text()
+    audit = (ROLE / "tasks/matrix-overlay-verify.yml").read_text()
+    assert "import_tasks: matrix-overlay-verify.yml" in normal
+    assert "import_tasks: matrix-overlay.yml" in upgrade
+    assert "--keep-stash" in upgrade
+    assert "--no-gateway-restart" in upgrade
+    assert "hermes_legacy_patch_blobs" in upgrade
+    assert "a7d53d905f" in upgrade
+    assert "ansible.builtin.copy" in overlay
+    assert "ansible.builtin.command" in overlay
+    assert "apply" in overlay
+    assert "apply" in audit
+    assert "ansible.builtin.copy" not in audit

@@ -99,6 +99,16 @@
         "helm/helm"
       ],
       "overrideDepName": "helm-cli"
+    },
+    {
+      "description": "Only published stable Hermes Agent releases; production upgrades stay manual",
+      "matchFileNames": [
+        "ansible/group_vars/all/versions.yml"
+      ],
+      "matchPackageNames": [
+        "NousResearch/hermes-agent"
+      ],
+      "allowedVersions": "/^v(?:0|[1-9][0-9]{0,2})\\.[0-9]+\\.[0-9]+$/"
     }
   ]
 }

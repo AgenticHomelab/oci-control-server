@@ -18,6 +18,7 @@ EXPECTED = {
     "helm_version": ("github-releases", "helm/helm"),
     "omni_version": ("docker", "ghcr.io/siderolabs/omni"),
     "omni_dex_version": ("docker", "ghcr.io/dexidp/dex"),
+    "hermes_release_version": ("github-releases", "NousResearch/hermes-agent"),
 }
 
 
@@ -44,6 +45,29 @@ def test_only_supported_host_pins_are_extracted():
         actual[key] = (groups["datasource"], groups["depName"])
 
     assert actual == EXPECTED
+
+
+
+def test_hermes_uses_only_stable_release_tags():
+    config = json.loads((ROOT / "renovate.json").read_text())
+    rules = [
+        rule for rule in config["packageRules"]
+        if "NousResearch/hermes-agent" in rule.get("matchPackageNames", [])
+    ]
+    assert len(rules) == 1
+    assert rules[0]["allowedVersions"] == "/^v(?:0|[1-9][0-9]{0,2})\\.[0-9]+\\.[0-9]+$/"
+    assert rules[0]["matchFileNames"] == [
+        "ansible/group_vars/all/versions.yml"
+    ]
+    values = yaml.safe_load(
+        (ROOT / "ansible/group_vars/all/versions.yml").read_text()
+    )
+    stable = r"v(?:0|[1-9][0-9]{0,2})\.[0-9]+\.[0-9]+"
+    assert re.fullmatch(stable, values["hermes_release_version"])
+    assert re.fullmatch(stable, "v2026.9.24") is None
+    assert "hermes_install_commit:" not in (
+        ROOT / "ansible/group_vars/control.yml"
+    ).read_text()
 
 
 def test_opentofu_registry_is_not_silently_switched():

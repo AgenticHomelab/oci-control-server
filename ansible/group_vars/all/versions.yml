@@ -15,6 +15,10 @@ flux_version: "2.9.6"
 # renovate: datasource=github-releases depName=helm/helm
 helm_version: "4.3.0"
 
+# Only stable upstream Hermes releases; deployment requires the isolated upgrade play.
+# renovate: datasource=github-releases depName=NousResearch/hermes-agent
+hermes_release_version: "v0.23.4"
+
 # renovate: datasource=docker depName=ghcr.io/siderolabs/omni
 omni_version: "v1.12.3"
 

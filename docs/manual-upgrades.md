@@ -10,6 +10,7 @@ No second runner, automatic deployment, or unattended container updater exists.
 `renovate.json` creates review-only PRs with a Dependency Dashboard. It watches:
 
 - Omni and Dex image tags in `ansible/group_vars/all/versions.yml`;
+- stable Hermes Agent releases in that file, without prerelease/canary tracking;
 - kubectl, talosctl, Flux CLI and Helm version pins in that file;
   Renovate names these as host CLI updates (`kubectl`, `talosctl`,
   `flux-cli`, `helm-cli`), while upstream release lookups retain their real
@@ -22,7 +23,7 @@ No second runner, automatic deployment, or unattended container updater exists.
 The `# renovate:` comments next to selected Ansible pins explicitly opt them in.
 Other pins are intentionally excluded: Grafana's build and SHA256, Alloy's APT
 version, Loki and VictoriaMetrics archives/checksums, OCI CLI, the OpenTofu
-tool binary/checksum, Hermes's installed commit and Node/npm, and Vault
+tool binary/checksum, Hermes's application-managed Node/npm packages, and Vault
 credential version numbers. Do not add those to Renovate until their
 coupled metadata and safe upgrade procedures can be updated and validated.
 
@@ -121,10 +122,82 @@ their archive checksums; Loki has `ansible/loki.yml` and an additional
 version-specific assertion in `ansible/roles/loki/tasks/main.yml`.
 These are not covered by the initial Renovate custom manager.
 
-Hermes uses an installed **exact commit**; the normal host role explicitly
-refuses a mismatched commit and does not perform upgrades. Follow a separately
-reviewed upstream-supported Hermes upgrade procedure, not a Renovate edit to
-`hermes_install_commit`.
+### Hermes Agent
+
+Renovate follows only upstream stable `vX.Y.Z` releases through
+`hermes_release_version`, excluding legacy CalVer `v2026.*` tags. The normal Hermes role does not upgrade the
+installation. It checks that the installed checkout is at the exact commit
+of the reviewed local release tag. An upgrade PR **must not be merged
+ahead of the corresponding reviewed deployment** if routine host applies
+must remain valid in the interim.
+
+The first transition from the existing October 2026 Git commit to the
+November stable release is a larger application upgrade, not a simple
+binary replacement. The initial operator-run native update completed
+successfully to intermediate **v0.22.0** (commit
+`e06df9c2eae6901f4c88f464e0ae6e753c0428b8`) and the playbook
+correctly stopped before unit reconciliation because the approved target
+is **v0.23.4**. The original updater used Hermes's separate source-channel
+service; v0.22.0's stable target resolver now reports the GitHub
+v0.23.4 release. The initial channel's historical response is not
+available to verify independently. Preserve the retained Git stash and
+local backup; do not reset the checkout or retry the live upgrade until
+the intermediate revision and Matrix adapter code match the exact
+preflight identities and the user approves recovery. The native updater can migrate app state and may
+restart the user services. Confirm a recoverable, independent copy of
+Hermes state and private operational assets, available capacity for the
+upstream `--backup` archive, and a maintenance window before attempting it.
+Avoid running the generic `playbook.yml` as part of this upgrade.
+
+Run the isolated play from the approved controller with the existing
+protected inventory and overlays:
+
+```sh
+ansible-playbook -i <approved-inventory> hermes-update.yml --check --diff
+# After review, from the approved checkout with operator authorization:
+ansible-playbook -i <approved-inventory> hermes-update.yml -e hermes_update_reviewed=true
+```
+
+The isolated play verifies the upstream source, reviewed stable tag and exact
+target Git commit. It also resolves the **installed updater's native stable
+channel target** and refuses to start a migration if that commit differs from
+the GitHub release tag. This gate prevents a mismatch between the native
+channel resolver and the published GitHub release from moving the checkout
+to an unreviewed intermediate version. It accepts a **clean** checkout or only the exact identified
+legacy Matrix modification on control-01, checked against reviewed Git blob
+identities; all unexpected changes block the upgrade. This is needed for the
+first transition, because the installed source contains an opt-in Matrix E2EE
+direct-key-delivery extension. See [Matrix overlay ownership](hermes-matrix-e2ee.md).
+
+After the review gate, the play calls
+`hermes update --channel stable --yes --backup --keep-stash --no-gateway-restart`.
+The native updater owns dependency changes and full pre-update backup; its
+retained Git stash preserves the old Matrix edit and website documentation
+without implicitly reapplying them to a different upstream version.
+The dedicated Ansible play applies the reviewed Matrix adapter patch and
+source module for **v0.23.4 only**, then reads the installed `pm/lock.json`,
+refreshes systemd runtime PATH and restarts both user services on the reviewed
+new code. The normal host play checks the approved Matrix overlay without
+mutating it. If the overlay patch no longer matches the upstream release,
+stop: update the patch and run the crypto compatibility tests first.
+
+The CI `Verify Hermes Matrix E2EE compatibility` job tests the real upstream
+Hermes release with `mautrix` encryption, including an added late-index
+regression. This does not replace functional messaging checks against the
+real homeserver. Do not separately run `hermes update` from an unreviewed job;
+doing so bypasses the reviewed Git release and source overlay.
+
+If upstream publishes another stable release between the preflight and the
+native update, the updater might select it. Post-verification rejects an
+unexpected commit, but cannot undo changes already made. Repeat the
+preflight immediately before the change; abort on new upstream releases.
+Do not assume Git rollback reverses data migrations.
+
+Verify dashboard login, gateway messaging, approved native scheduled jobs,
+GitHub App use, operational permissions, and relevant backup/recovery paths
+afterward. Systemd `active` alone does not establish functional acceptance.
+Record actual runtime revision and outcomes before merging the matching
+release PR.
 
 Ubuntu security updates and third-party APT packages use the host's existing
 APT policy. Renovate does not replace unattended-upgrades or provide assurance

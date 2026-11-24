@@ -13,10 +13,7 @@ ubuntu_pro_token: >-
 cloudflare_api_token: >-
   {{ lookup('ansible.builtin.env', 'CLOUDFLARE_API_TOKEN') }}
 
-# Exact observed production source revision; normal applies do not upgrade it.
-hermes_install_commit: "4e3fcd5cd7e40c37cb6f9a21a76fc57a7361957a"
-hermes_node_version: "26.7.0"
-hermes_npm_version: "12.0.2"
+# Hermes release ownership moved to group_vars/all/versions.yml.
 # Verified App authentication; signing PEM was bootstrapped by the operator.
 hermes_github_app_enabled: true
 # Pinned Vault metadata verified during bootstrap; host IAM/retrieval stay disabled.
