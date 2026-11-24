@@ -47,7 +47,7 @@ jobs:
         working-directory: ansible
         run: |
           set -euo pipefail
-          for play in grafana-backup.yml grafana-tailnet-dns.yml grafana-tailnet.yml hermes-fleet-health.yml hermes-omni-key-renewal.yml hermes-operational-access.yml hermes-truenas-opentofu.yml loki.yml observability.yml omni-update.yml toolchain-update.yml omni-garage-ca.yml playbook.yml talos-metrics-receiver.yml talos-logs-receiver.yml talos-renovate-dispatch.yml talos-secrets-bootstrap.yml; do
+          for play in grafana-backup.yml grafana-tailnet-dns.yml grafana-tailnet.yml hermes-fleet-health.yml hermes-omni-key-renewal.yml hermes-operational-access.yml hermes-update.yml hermes-truenas-opentofu.yml loki.yml observability.yml omni-update.yml toolchain-update.yml omni-garage-ca.yml playbook.yml talos-metrics-receiver.yml talos-logs-receiver.yml talos-renovate-dispatch.yml talos-secrets-bootstrap.yml; do
             "$RUNNER_TEMP/public-venv/bin/ansible-playbook" -i localhost, "$play" --syntax-check
           done
       - name: Run selected synthetic receiver and ESO contracts
