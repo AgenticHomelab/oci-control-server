@@ -1,0 +1,2 @@
+# HCL parser for the offline ESO IAM source contracts.
+python-hcl2>=7,<8

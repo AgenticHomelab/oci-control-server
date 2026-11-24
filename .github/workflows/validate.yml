@@ -26,7 +26,7 @@ jobs:
       - name: Install offline validation tools
         run: |
           python3 -m venv "$RUNNER_TEMP/public-venv"
-          "$RUNNER_TEMP/public-venv/bin/pip" install -r requirements-test.txt ansible-core==2.21.4
+          "$RUNNER_TEMP/public-venv/bin/pip" install -r requirements-test.txt -r tests/requirements-eso-iam.txt ansible-core==2.21.4
       - name: Validate OpenTofu without production backend
         env:
           TF_IN_AUTOMATION: '1'
@@ -41,12 +41,12 @@ jobs:
         working-directory: ansible
         run: |
           set -euo pipefail
-          for play in grafana-backup.yml grafana-tailnet-dns.yml grafana-tailnet.yml hermes-fleet-health.yml hermes-omni-key-renewal.yml hermes-operational-access.yml hermes-truenas-opentofu.yml loki.yml observability.yml omni-garage-ca.yml playbook.yml talos-metrics-receiver.yml talos-logs-receiver.yml talos-renovate-dispatch.yml; do
+          for play in grafana-backup.yml grafana-tailnet-dns.yml grafana-tailnet.yml hermes-fleet-health.yml hermes-omni-key-renewal.yml hermes-operational-access.yml hermes-truenas-opentofu.yml loki.yml observability.yml omni-garage-ca.yml playbook.yml talos-metrics-receiver.yml talos-logs-receiver.yml talos-renovate-dispatch.yml talos-secrets-bootstrap.yml; do
             "$RUNNER_TEMP/public-venv/bin/ansible-playbook" -i localhost, "$play" --syntax-check
           done
-      - name: Run selected synthetic receiver contracts
+      - name: Run selected synthetic receiver and ESO contracts
         run: |
-          PATH="$RUNNER_TEMP/public-venv/bin:$PATH" "$RUNNER_TEMP/public-venv/bin/python" -m pytest -q tests/test_talos_metrics_receiver.py tests/test_public_hermes_github_app.py tests/test_hermes_operations_source.py
+          PATH="$RUNNER_TEMP/public-venv/bin:$PATH" "$RUNNER_TEMP/public-venv/bin/python" -m pytest -q tests/test_talos_metrics_receiver.py tests/test_public_hermes_github_app.py tests/test_hermes_operations_source.py tests/test_talos_eso_iam.py tests/test_talos_secrets_bootstrap.py tests/test_eso_ci_contract.py
       - name: Assemble clean tracked-file scan tree
         run: |
           set -euo pipefail

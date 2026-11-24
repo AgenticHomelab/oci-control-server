@@ -289,6 +289,30 @@
         "08c6",
         "e721"
       ]
+    },
+    "docs/talos-secrets-bootstrap.md": {
+      "reason": "Explicitly synthetic, non-deployable Vault secret OCID selectors in the bootstrap schema example, not credentials",
+      "findings": [
+        {"tool": "gitleaks", "rule": "generic-api-key", "line": 76},
+        {"tool": "gitleaks", "rule": "generic-api-key", "line": 79}
+      ],
+      "git_blob_prefix_segments": ["f4ab", "5416", "4212", "0adb"]
+    },
+    "tests/test_talos_eso_iam.py": {
+      "reason": "Negative lexical-validation fixtures: literal PEM headers with synthetic NOT-A-KEY payload, deliberately rejected as private material; no usable key",
+      "findings": [
+        {"tool": "detect-secrets", "rule": "Private Key", "line": 206},
+        {"tool": "detect-secrets", "rule": "Private Key", "line": 207}
+      ],
+      "git_blob_prefix_segments": ["11b8", "4606", "b1fc", "f69e"]
+    },
+    "tests/test_talos_secrets_bootstrap.py": {
+      "reason": "Named synthetic OCI-key fixture and synthetic unrelated environment sentinel used to test no credential forwarding; no real credential bytes",
+      "findings": [
+        {"tool": "detect-secrets", "rule": "Secret Keyword", "line": 36},
+        {"tool": "detect-secrets", "rule": "Secret Keyword", "line": 121}
+      ],
+      "git_blob_prefix_segments": ["f6dc", "de5b", "68fd", "baab"]
     }
   }
 }
