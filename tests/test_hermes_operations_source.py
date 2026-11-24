@@ -131,6 +131,25 @@ def test_hermes_release_update_is_isolated_and_not_automatic():
         if task["name"].startswith("Refuse a native stable-channel target")
     )
     assert "hermes_native_channel_sha.stdout | trim == hermes_expected_sha" in str(native_gate)
+
+    # The first native update on control-01 stopped at the older stable
+    # channel's v0.22.0 target. Only that exact known intermediate SHA and
+    # reviewed Matrix adapter blob may pass a second preflight.
+    preflight = next(
+        task for task in update_tasks
+        if task["name"].startswith("Refuse altered or unreviewed legacy Matrix")
+    )
+    conditions = str(preflight["ansible.builtin.assert"]["that"])
+    assert "e06df9c2eae6901f4c88f464e0ae6e753c0428b8" in conditions
+    assert "628f08c69a53c66b123489471fa459125f6ec57e" in conditions
+    assert "8fc0374447313e276f6b9a2764bfc750190c966a" in conditions
+    assert "hermes_before_sha.stdout" in conditions
+    preflight_index = update_tasks.index(preflight)
+    revision_index = next(
+        i for i, task in enumerate(update_tasks)
+        if task["name"] == "Read current Hermes checkout revision"
+    )
+    assert revision_index < preflight_index
     native_probe = next(
         task for task in update_tasks
         if task["name"].startswith("Resolve the target the installed Hermes updater")
