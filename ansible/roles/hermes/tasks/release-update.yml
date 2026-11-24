@@ -123,11 +123,19 @@
       - hermes_expected_sha is match('^[0-9a-f]{40}$')
     fail_msg: Could not resolve the reviewed Hermes release tag to a commit.
 
+- name: Read Hermes service user ID
+  ansible.builtin.command:
+    argv: [id, -u, hermes]
+  register: hermes_upgrade_uid
+  changed_when: false
+  check_mode: false
+
 - name: Inspect the native Hermes update plan
   become_user: hermes
   environment:
     HOME: /home/hermes
     HERMES_HOME: /home/hermes/.hermes
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_upgrade_uid.stdout | trim }}"
   ansible.builtin.command:
     argv:
       - /home/hermes/.local/bin/hermes
@@ -159,6 +167,7 @@
   environment:
     HOME: /home/hermes
     HERMES_HOME: /home/hermes/.hermes
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_upgrade_uid.stdout | trim }}"
   ansible.builtin.command:
     argv:
       - /home/hermes/.local/bin/hermes
@@ -181,13 +190,6 @@
 - name: Reconcile Hermes systemd units with the updated runtime lock
   ansible.builtin.import_tasks: runtime-units.yml
   when: not ansible_check_mode
-
-- name: Read Hermes service user ID
-  ansible.builtin.command:
-    argv: [id, -u, hermes]
-  register: hermes_upgrade_uid
-  changed_when: false
-  check_mode: false
 
 - name: Require Hermes gateway and dashboard services active
   become_user: hermes
