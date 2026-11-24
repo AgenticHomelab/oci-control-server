@@ -23,7 +23,7 @@ No second runner, automatic deployment, or unattended container updater exists.
 The `# renovate:` comments next to selected Ansible pins explicitly opt them in.
 Other pins are intentionally excluded: Grafana's build and SHA256, Alloy's APT
 version, Loki and VictoriaMetrics archives/checksums, OCI CLI, the OpenTofu
-tool binary/checksum, Hermes's Node/npm runtime details, and Vault
+tool binary/checksum, Hermes's application-managed Node/npm packages, and Vault
 credential version numbers. Do not add those to Renovate until their
 coupled metadata and safe upgrade procedures can be updated and validated.
 
@@ -152,8 +152,9 @@ The isolated play verifies an official clean checkout, a stable release tag,
 the currently latest upstream stable release, and the resolved exact tag
 commit before invoking `hermes update --channel stable --yes --backup`.
 The upstream updater owns dependency changes, backup and gateway restart.
-Ansible verifies the expected Git commit and checks gateway/dashboard
-systemd units afterward. Do not separately run `hermes update` from an
+Ansible reads the installed upstream `pm/lock.json` and refreshes systemd
+runtime PATH without maintaining duplicate Node/npm pins. It then verifies the
+expected Git commit and checks gateway/dashboard systemd units afterward. Do not separately run `hermes update` from an
 unreviewed automation job; doing so bypasses the reviewed Git release pin.
 
 If upstream publishes another stable release between the preflight and the
