@@ -51,7 +51,7 @@ Enabling requires all of the following non-secret metadata:
 | `talos_eso_enabled` | `false` | Explicit approved opt-in |
 | `talos_eso_api_signing_public_key_pem` | `null` | Independently operator-created RSA API signing PUBLIC KEY PEM, never a path/private key/certificate/bundle |
 | `talos_eso_runtime_secret_ocids` | `[]` | Nonempty exact allowlist of operator-created runtime secrets |
-| `talos_eso_bootstrap_secret_ocids` | `[]` | Nonempty explicit denylist of bootstrap secrets, including the separately managed ESO signing-key bundle and any Git/SOPS bootstrap credentials |
+| `talos_eso_bootstrap_secret_ocids` | `[]` | Nonempty explicit denylist of bootstrap secrets, including the separately managed ESO signing-key bundle and private Git deploy credential |
 
 The existing `control_vault_enabled` must already represent the approved,
 managed control Vault. Reuse the existing Identity Domains endpoint and

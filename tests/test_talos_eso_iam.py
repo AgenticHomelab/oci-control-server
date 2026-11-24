@@ -254,7 +254,7 @@ def test_host_cloudflare_token_is_denied_after_separate_kubernetes_import():
     ):
         assert still_denied in names, still_denied
     # The explicit operator-supplied denylist still blocks ESO's own signing-key
-    # bundle and any Git/SOPS bootstrap credential, disjoint from runtime IDs.
+    # bundle and the private Git deploy credential, disjoint from runtime IDs.
     user = resources()[("oci_identity_domains_user", "talos_eso")]
     lifecycle = user["lifecycle"][0]
     conditions = {compact(p["condition"]) for p in lifecycle["precondition"]}

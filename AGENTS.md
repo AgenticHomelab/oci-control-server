@@ -19,8 +19,10 @@ still require their own authorization and verification.
   apply, infrastructure imports, service changes, credential rotation, or
   production Ansible reconciliation.
 - OpenTofu owns OCI infrastructure and IAM **metadata**, Ansible owns the
-  management host, Omni owns Talos lifecycle, Flux owns persistent Kubernetes
-  desired state, and native applications own mutable runtime data.
+  management host and isolated Talos bootstrap recovery, Omni owns Talos lifecycle,
+  Flux owns Kubernetes desired state, ESO synchronizes Vault-backed runtime
+  Secrets, and native applications own mutable runtime data. Use the current
+  [bootstrap contract](docs/talos-secrets-bootstrap.md), not historical migration code.
 - Never publish real private network topology, administrator credential paths,
   Vault secret identifiers, user-selected private DNS names or personal
   endpoints, historical backup object identities, or raw sensitive evidence.

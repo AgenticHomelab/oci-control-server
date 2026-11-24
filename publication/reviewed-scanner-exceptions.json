@@ -305,10 +305,10 @@
         }
       ],
       "git_blob_prefix_segments": [
-        "ac47",
-        "4668",
-        "1cab",
-        "bad2"
+        "73e3",
+        "e38e",
+        "0022",
+        "d846"
       ]
     },
     "tests/test_talos_eso_iam.py": {
@@ -326,10 +326,10 @@
         }
       ],
       "git_blob_prefix_segments": [
-        "a261",
-        "5bac",
-        "ea58",
-        "9cc4"
+        "e0f6",
+        "d8a6",
+        "6375",
+        "6e61"
       ]
     },
     "tests/test_talos_secrets_bootstrap.py": {
@@ -353,88 +353,6 @@
         "7b2d"
       ]
     },
-    "tests/test_eso_migration.py": {
-      "reason": "Synthetic fixtures: bundle/secret key names and fake K8s secret values; no real credentials",
-      "findings": [
-        {
-          "tool": "detect-secrets",
-          "rule": "Secret Keyword",
-          "line": 53
-        },
-        {
-          "tool": "detect-secrets",
-          "rule": "Secret Keyword",
-          "line": 165
-        },
-        {
-          "tool": "detect-secrets",
-          "rule": "Secret Keyword",
-          "line": 168
-        },
-        {
-          "tool": "detect-secrets",
-          "rule": "Secret Keyword",
-          "line": 816
-        },
-        {
-          "tool": "detect-secrets",
-          "rule": "Secret Keyword",
-          "line": 982
-        },
-        {
-          "tool": "detect-secrets",
-          "rule": "Secret Keyword",
-          "line": 999
-        },
-        {
-          "tool": "detect-secrets",
-          "rule": "Secret Keyword",
-          "line": 1090
-        },
-        {
-          "tool": "gitleaks",
-          "rule": "generic-api-key",
-          "line": 28
-        }
-      ],
-      "git_blob_prefix_segments": [
-        "e911",
-        "1c75",
-        "706d",
-        "126b"
-      ]
-    },
-    "scripts/eso-migration/eso_migrate.py": {
-      "reason": "Sanitized driver: regex/annotation literals and Kubernetes Secret selector name strings; no credential values",
-      "findings": [
-        {
-          "tool": "detect-secrets",
-          "rule": "Secret Keyword",
-          "line": 106
-        },
-        {
-          "tool": "detect-secrets",
-          "rule": "Secret Keyword",
-          "line": 1187
-        },
-        {
-          "tool": "detect-secrets",
-          "rule": "Secret Keyword",
-          "line": 1188
-        },
-        {
-          "tool": "gitleaks",
-          "rule": "generic-api-key",
-          "line": 106
-        }
-      ],
-      "git_blob_prefix_segments": [
-        "7423",
-        "7434",
-        "59ea",
-        "2e8a"
-      ]
-    },
     "ansible/roles/talos_secrets_bootstrap/files/bootstrap.py": {
       "reason": "Sanitized helper: profile/selector validation literals; no credential values",
       "findings": [],
@@ -449,10 +367,10 @@
       "reason": "Command/selector names in operator documentation; no credential values",
       "findings": [],
       "git_blob_prefix_segments": [
-        "30d4",
-        "76d0",
-        "191e",
-        "012b"
+        "2a54",
+        "dc89",
+        "b9d1",
+        "58a6"
       ]
     }
   }

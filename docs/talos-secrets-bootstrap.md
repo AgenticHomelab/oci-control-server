@@ -12,7 +12,7 @@ It restores only:
 The Flux bundle may additionally contain the existing `identity.pub`; nothing
 is derived or generated. The stored SSH identity, optional public key and
 previously verified `known_hosts` are copied byte for byte. No key generation,
-`ssh-keyscan`, credential rotation, SOPS decryption, ESO controller, Terraform,
+`ssh-keyscan`, credential rotation, ESO controller deployment, Terraform,
 full-cluster bootstrap, or continuous secret-sync daemon is involved.
 
 ## Dependencies and custody gates
@@ -103,9 +103,19 @@ contact APIs, or forecast changes. Missing credential files are deliberately
 allowed in this metadata-only mode. A successful check does not verify access,
 pins, key validity, existing data, readiness or idempotence.
 
-Only after the separate gates above may an operator run the same isolated
-entrypoint without `--check`, using the reviewed private inputs. Do not run the
-normal host play, change the current context, or bootstrap other cluster owners.
+Only after the separate gates above may an operator run the isolated
+entrypoint using the reviewed protected extra-vars file. The actual
+`bootstrap-inputs.json` from accepted migration contains selectors, not
+credential values; retain an independent protected copy.
+
+```sh
+ansible-playbook -i localhost, ansible/talos-secrets-bootstrap.yml \
+  --extra-vars @/protected/bootstrap-inputs.json
+```
+
+Before execution, provision the established `flux-system` and
+`external-secrets` namespaces if absent under the approved cluster bootstrap
+procedure. Do not run the normal host play or change the current context.
 
 Normal execution checks the operator profile, retrieves exactly the two pinned
 bundles through explicit `--auth api_key`, then preflights **both** target Secrets
