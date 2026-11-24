@@ -8,12 +8,12 @@
         {
           "tool": "gitleaks",
           "rule": "generic-api-key",
-          "line": 32
+          "line": 30
         },
         {
           "tool": "gitleaks",
           "rule": "generic-api-key",
-          "line": 65
+          "line": 63
         },
         {
           "tool": "detect-secrets",
@@ -23,14 +23,14 @@
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 31
+          "line": 29
         }
       ],
       "git_blob_prefix_segments": [
-        "b392",
-        "732f",
-        "2000",
-        "f9bb"
+        "adab",
+        "23f5",
+        "d942",
+        "d59f"
       ]
     },
     "ansible/roles/edge/defaults/main.yml": {
