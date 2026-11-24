@@ -959,6 +959,24 @@ def test_journal_mismatch_fails_closed(fx):
     assert result.returncode != 0
 
 
+def test_inventory_legacy_vault_name_is_provenance_only(fx):
+    live = json.loads((fx.tmp / 'oci-live.json').read_text())
+    selector = 'alloy/talos-metrics-ingestion'
+    live['kube_secrets'][selector]['metadata']['annotations'] = {
+        REUSE_ANNOTATION: 'legacy-vault-entry'}
+    (fx.tmp / 'oci-live.json').write_text(json.dumps(live))
+    result = fx.run('inventory', fx.make_config())
+    assert result.returncode == 0, result.stdout
+    status = json.loads(result.stdout.strip().splitlines()[-1])
+    draft = json.loads(Path(status['draft']).read_text())
+    assert any(t['k8s'] == {'namespace': 'alloy',
+                           'name': 'talos-metrics-ingestion'}
+               for t in draft['runtime_targets'])
+    assert all(selector not in entry['targets']
+               for entry in draft['reuse_entries'])
+    assert 'legacy-vault-entry' not in json.dumps(draft)
+
+
 def test_inventory_rejects_malformed_annotation_ocid(fx):
     # A typo'd annotation value must fail closed, not become a new target.
     live = json.loads((fx.tmp / 'oci-live.json').read_text())
