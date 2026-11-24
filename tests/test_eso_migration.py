@@ -904,7 +904,7 @@ def test_apply_happy_path_applies_saved_plan(fx):
     assert journal['applied'] is True
     assert journal['eso_user_ocid'] == ESO_USER
     # tofu output echoed the custody key's real fingerprint.
-    assert re.fullmatch(r'(?:[0-9a-f]{2}:){19}[0-9a-f]{2}',
+    assert re.fullmatch(r'(?:[0-9a-f]{2}:){15}[0-9a-f]{2}',
                         journal['api_key_fingerprint'])
     assert journal['kubernetes']['auth_secret'] == 'external-secrets/oci-vault-auth'
 
