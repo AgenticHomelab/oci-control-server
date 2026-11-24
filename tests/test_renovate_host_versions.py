@@ -56,6 +56,39 @@ def test_opentofu_registry_is_not_silently_switched():
         for rule in config["packageRules"]
     )
 
+
+def test_cli_update_names_do_not_look_like_cluster_upgrades():
+    config = json.loads((ROOT / "renovate.json").read_text())
+    expected = {
+        "kubernetes/kubernetes": "kubectl",
+        "siderolabs/talos": "talosctl",
+        "fluxcd/flux2": "flux-cli",
+        "helm/helm": "helm-cli",
+    }
+    aliases = [
+        rule for rule in config["packageRules"]
+        if "overrideDepName" in rule
+    ]
+    assert len(aliases) == len(expected)
+    actual = {}
+    for rule in aliases:
+        assert rule["matchFileNames"] == [
+            "ansible/group_vars/all/versions.yml"
+        ]
+        assert len(rule["matchPackageNames"]) == 1
+        package = rule["matchPackageNames"][0]
+        assert package not in actual
+        actual[package] = rule["overrideDepName"]
+    assert actual == expected
+
+    # Keep canonical upstream references for release lookups. The aliases
+    # affect only the Renovate PR and Dependency Dashboard display names.
+    group_vars = (ROOT / "ansible/group_vars/all/versions.yml").read_text()
+    assert "# renovate: datasource=github-tags depName=kubernetes/kubernetes" in group_vars
+    assert "# renovate: datasource=github-releases depName=siderolabs/talos" in group_vars
+
+
+
 def test_control_inventory_receives_reviewed_pins():
     expected = yaml.safe_load(
         (ROOT / "ansible/group_vars/all/versions.yml").read_text()
