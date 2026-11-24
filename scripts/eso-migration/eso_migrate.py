@@ -654,7 +654,7 @@ def oci_vault_bundle_by_name(cfg, op_profile, vault_ocid, name):
     data = parse_native_json(oci(
         cfg, op_profile, 'secrets', 'secret-bundle',
         'get-secret-bundle-by-name',
-        '--vault-id', vault_ocid, '--secret-name', name),
+        '--vault-id', vault_ocid, '--secret-name', name, '--stage', 'CURRENT'),
         'oci secrets secret-bundle get-secret-bundle-by-name')
     return (data or {}).get('data') or {}
 
@@ -740,6 +740,24 @@ def json_map_payload(values):
                       separators=(',', ':'))
 
 
+def checked_current_bundle(bundle, secret_ocid, content):
+    """Validate native bundle metadata and exact encoded content separately."""
+    require(bundle.get('secret-id') == secret_ocid,
+            'Vault bundle identity mismatch')
+    stages = bundle.get('stages')
+    require(isinstance(stages, list) and 'CURRENT' in stages,
+            'Vault bundle is not CURRENT or stages metadata is missing')
+    version = bundle.get('version-number')
+    require(type(version) is int and version >= 1,
+            'Vault bundle version number invalid')
+    body = bundle.get('secret-bundle-content')
+    require(isinstance(body, dict) and body.get('content-type') == 'BASE64'
+            and isinstance(body.get('content'), str),
+            'Vault bundle encoding invalid')
+    require(body['content'] == content, E_VAULT)
+    return {'secret_ocid': secret_ocid, 'version_number': version}
+
+
 def vault_create_or_reuse_equal(cfg, op_profile, inv, name, payload_text,
                                 description):
     """Create-once / reuse-equal vault secret import.
@@ -758,15 +776,7 @@ def vault_create_or_reuse_equal(cfg, op_profile, inv, name, payload_text,
         require(existing[0].get('lifecycle-state') == 'ACTIVE',
                 'existing Vault secret is not ACTIVE; inspect vault-status')
         bundle = oci_vault_bundle_by_name(cfg, op_profile, vault, name)
-        stages = bundle.get('version-stages') or []
-        require('CURRENT' in stages and bundle.get('secret-id') == existing[0]['id'],
-                E_VAULT)
-        require(bundle.get('secret-bundle-content', {}).get('content-type')
-                == 'BASE64', E_VAULT)
-        existing_content = bundle['secret-bundle-content'].get('content', '')
-        require(existing_content == content, E_VAULT)
-        return {'secret_ocid': existing[0]['id'],
-                'version_number': bundle.get('version-number', 1)}
+        return checked_current_bundle(bundle, existing[0]['id'], content)
     # Absent: create exactly once. Content travels via a protected temp file.
     import tempfile
     with tempfile.TemporaryDirectory(dir=str(custody)) as td:
@@ -786,14 +796,7 @@ def vault_create_or_reuse_equal(cfg, op_profile, inv, name, payload_text,
     require(isinstance(secret_ocid, str) and OCID.match(secret_ocid),
             E_VAULT)
     bundle = oci_vault_bundle_by_name(cfg, op_profile, vault, name)
-    version = bundle.get('version-number')
-    require(isinstance(version, int) and version >= 1, E_VAULT)
-    require('CURRENT' in (bundle.get('version-stages') or [])
-            and bundle.get('secret-id') == secret_ocid
-            and bundle.get('secret-bundle-content', {}).get('content-type') == 'BASE64'
-            and bundle.get('secret-bundle-content', {}).get('content') == content,
-            E_VAULT)
-    return {'secret_ocid': secret_ocid, 'version_number': version}
+    return checked_current_bundle(bundle, secret_ocid, content)
 
 
 def import_eso_bundle(cfg, op_profile, inv):
@@ -830,7 +833,7 @@ def import_runtime_targets(cfg, op_profile, inv):
                                               target['name'])
             require(bundle.get('secret-id') == target['secret_ocid'],
                     E_VAULT)
-            require('CURRENT' in (bundle.get('version-stages') or []),
+            require('CURRENT' in (bundle.get('stages') or []),
                     E_VAULT)
             out.append({'name': target['name'],
                         'vault_name': target['name'],
@@ -915,7 +918,7 @@ def resolve_reuse_entries(cfg, op_profile, inv):
         if entry.get('verified'):
             bundle = oci_vault_bundle_by_name(cfg, op_profile, vault, name)
             require(bundle.get('secret-id') == entry['ocid'], E_VAULT)
-            require('CURRENT' in (bundle.get('version-stages') or []),
+            require('CURRENT' in (bundle.get('stages') or []),
                     E_VAULT)
             try:
                 vault_bytes = base64.b64decode(
@@ -1224,7 +1227,12 @@ def mode_plan(cfg, args=None):
     plan_bytes = plan_bin.read_bytes()
     plan_json_text = tofu(cfg, 'show', '-json', str(plan_bin))
     plan = parse_native_json(plan_json_text)
-    changes = plan.get('resource_changes') or []
+    # Native plan JSON includes unchanged resources, not just mutations.
+    # A no-op with a move/import is still a state change; refuse it.
+    changes = [c for c in (plan.get('resource_changes') or [])
+               if c.get('change', {}).get('actions') != ['no-op']
+               or c.get('previous_address') or c.get('change', {}).get('importing')
+               or c.get('deposed')]
     unexpected = [c for c in changes
                   if c.get('address') not in TALOS_ESO_ADDRESSES]
     require(not unexpected, E_PLAN_UNEXPECTED)
@@ -1254,11 +1262,10 @@ def mode_apply(cfg, args):
     digest = hashlib.sha256(plan_bin.read_bytes()).hexdigest()
     require(approved[0] == digest, E_DIGEST)
     tofu(cfg, 'apply', '-input=false', '-no-color', str(plan_bin))
-    outputs = parse_native_json(
-        tofu(cfg, 'output', '-json', 'talos_eso_iam_metadata'))
-    require(isinstance(outputs, dict) and isinstance(outputs.get('value'), dict),
-            E_APPLIED)
-    metadata = outputs['value']
+    # A named output is the value itself, without the all-outputs envelope.
+    metadata = parse_native_json(
+        tofu(cfg, 'output', '-json', 'talos_eso_iam_metadata'), 'tofu output')
+    require(isinstance(metadata, dict), E_APPLIED)
     require(metadata.get('user_ocid')
             and metadata.get('api_key_fingerprint'), E_APPLIED)
     # Safe known-fingerprint compare: public metadata only, no values logged.
@@ -1315,12 +1322,12 @@ def mode_verify(cfg, args=None):
                                           target.get('vault_name')
                                           or target['name'])
         require(bundle.get('secret-id') == target['secret_ocid'], E_VERIFY)
-        require('CURRENT' in (bundle.get('version-stages') or []), E_VERIFY)
+        require('CURRENT' in (bundle.get('stages') or []), E_VERIFY)
     for entry in journal.get('reuse_entries') or []:
         bundle = oci_vault_bundle_by_name(cfg, eso_profile, vault,
                                           entry['name'])
         require(bundle.get('secret-id') == entry['ocid'], E_VERIFY)
-        require('CURRENT' in (bundle.get('version-stages') or []), E_VERIFY)
+        require('CURRENT' in (bundle.get('stages') or []), E_VERIFY)
     # Negative: by-ID reads of both bootstrap bundle OCIDs and the
     # unrelated sentinel must be DENIED by IAM. A denial counts only
     # when the CLI error parses as a real authorization failure code;

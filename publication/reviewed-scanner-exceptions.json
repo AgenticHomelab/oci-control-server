@@ -374,22 +374,22 @@
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 793
+          "line": 812
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 939
+          "line": 978
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 956
+          "line": 995
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 1026
+          "line": 1065
         },
         {
           "tool": "gitleaks",
@@ -398,10 +398,10 @@
         }
       ],
       "git_blob_prefix_segments": [
-        "af4e",
-        "c096",
-        "06fb",
-        "d49b"
+        "170f",
+        "94e1",
+        "863a",
+        "d003"
       ]
     },
     "scripts/eso-migration/eso_migrate.py": {
@@ -415,12 +415,12 @@
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 1174
+          "line": 1177
         },
         {
           "tool": "detect-secrets",
           "rule": "Secret Keyword",
-          "line": 1175
+          "line": 1178
         },
         {
           "tool": "gitleaks",
@@ -429,10 +429,10 @@
         }
       ],
       "git_blob_prefix_segments": [
-        "ad10",
-        "9319",
-        "6f96",
-        "5ad5"
+        "8007",
+        "cf41",
+        "b5ec",
+        "9643"
       ]
     },
     "ansible/roles/talos_secrets_bootstrap/files/bootstrap.py": {
@@ -449,10 +449,10 @@
       "reason": "Command/selector names in operator documentation; no credential values",
       "findings": [],
       "git_blob_prefix_segments": [
-        "fa92",
-        "41f2",
-        "fecf",
-        "903d"
+        "a5a7",
+        "3df3",
+        "be91",
+        "193c"
       ]
     }
   }
