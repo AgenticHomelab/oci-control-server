@@ -46,7 +46,7 @@ jobs:
           done
       - name: Run selected synthetic receiver and ESO contracts
         run: |
-          PATH="$RUNNER_TEMP/public-venv/bin:$PATH" "$RUNNER_TEMP/public-venv/bin/python" -m pytest -q tests/test_talos_metrics_receiver.py tests/test_public_hermes_github_app.py tests/test_hermes_operations_source.py tests/test_talos_eso_iam.py tests/test_talos_secrets_bootstrap.py tests/test_eso_ci_contract.py
+          PATH="$RUNNER_TEMP/public-venv/bin:$PATH" "$RUNNER_TEMP/public-venv/bin/python" -m pytest -q tests/test_talos_metrics_receiver.py tests/test_public_hermes_github_app.py tests/test_hermes_operations_source.py tests/test_talos_eso_iam.py tests/test_talos_secrets_bootstrap.py tests/test_eso_ci_contract.py tests/test_eso_migration.py
       - name: Assemble clean tracked-file scan tree
         run: |
           set -euo pipefail

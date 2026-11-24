@@ -137,7 +137,12 @@ def test_runtime_policy_is_exact_and_fail_closed_against_bootstrap_secrets():
     }
     denied = compact(locals_["talos_eso_bootstrap_secret_ocids"])
     assert 'setunion(var.talos_eso_bootstrap_secret_ocids, toset(compact([' in denied
-    assert {"var." + name for name in vault_variables} <= set(re.findall(r"var\.[A-Za-z0-9_]+", denied))
+    # The operator-approved raw shared Cloudflare token is exempt: it may be
+    # reused by ESO after the operator independently validates byte-equality.
+    shared_cloudflare = "control_cloudflare_secret_ocid"
+    denied_names = set(re.findall(r"var\.[A-Za-z0-9_]+", denied))
+    assert {"var." + name for name in vault_variables - {shared_cloudflare}} <= denied_names
+    assert "var." + shared_cloudflare not in denied_names
     lifecycle = managed[("oci_identity_domains_user", "talos_eso")]["lifecycle"][0]
     conditions = {compact(p["condition"]) for p in lifecycle["precondition"]}
     assert conditions == {
@@ -156,16 +161,11 @@ def test_runtime_policy_is_exact_and_fail_closed_against_bootstrap_secrets():
     assert 'private' not in metadata.lower()
 
 
-def test_plan_reader_only_adds_exact_eso_metadata_names_when_enabled():
+def test_plan_reader_has_no_eso_names_or_feature_flag_dependencies():
     text = (TF / "hermes_oci_plan.tf").read_text()
-    assert "talos-eso-vault-reader" in text, "Plan-reader metadata must recognize the dedicated ESO identity"
-    assert text.count("talos-eso-vault-reader") == 3
-    for kind in ("user", "group"):
-        assert '${var.talos_eso_enabled ? ", target.' + kind + '.name = \'talos-eso-vault-reader\'" : ""}' in text
-    assert ('where ${var.talos_eso_enabled ? "any {target.policy.name = \'oci-control-server-vault-reader\', '
-            'target.policy.name = \'talos-eso-vault-reader\'}" : '
-            '"target.policy.name = \'oci-control-server-vault-reader\'"}') in text
-    # No secret reads, signing-key reads, or domain-administration expansion.
+    # Enabling dedicated ESO IAM must never widen Hermes permanent permissions.
+    assert "talos-eso-vault-reader" not in text
+    assert "talos_eso" not in text
     assert "SECRET_BUNDLE_READ" not in text
     assert "read api-keys" not in text
     assert "manage domains" not in text
@@ -213,21 +213,18 @@ def test_source_public_key_regex_never_accepts_private_pem_or_bundles(value, acc
     assert bool(re.fullmatch(source_regex("talos_eso_api_signing_public_key_pem"), value)) is accepted
 
 
-def test_disabled_metadata_templates_preserve_original_inspection_scope():
+def test_plan_reader_keeps_exact_original_inspection_statements():
     text = (TF / "hermes_oci_plan.tf").read_text()
+    # No PR9-era conditional templates exist; the statements are literal.
     pattern = r'\$\{var\.talos_eso_enabled \? "([^"]*)" : "([^"]*)"\}'
-    disabled, count = re.subn(pattern, lambda m: m.group(2), text)
-    assert count == 3
-    enabled = re.sub(pattern, lambda m: m.group(1), text)
-    assert "talos-eso-vault-reader" not in disabled
-    assert enabled.count("talos-eso-vault-reader") == 3
-    disabled_policy = next(entry["oci_identity_policy"]["hermes_oci_plan"] for entry in hcl2.loads(disabled)["resource"] if "hermes_oci_plan" in entry.get("oci_identity_policy", {}))
-    enabled_policy = next(entry["oci_identity_policy"]["hermes_oci_plan"] for entry in hcl2.loads(enabled)["resource"] if "hermes_oci_plan" in entry.get("oci_identity_policy", {}))
-    assert len(enabled_policy["statements"]) == len(disabled_policy["statements"])
+    assert not re.search(pattern, text)
+    policy = next(entry["oci_identity_policy"]["hermes_oci_plan"]
+                  for entry in hcl2.loads(text)["resource"]
+                  if "hermes_oci_plan" in entry.get("oci_identity_policy", {}))
     prefix = "Allow dynamic-group id ${oci_identity_dynamic_group.hermes_oci_plan[0].id} to inspect "
-    assert prefix + "users in tenancy where any {target.user.name = 'hermes-truenas-opentofu-s3', target.user.name = 'hermes-oci-opentofu-s3'}" in disabled_policy["statements"]
-    assert prefix + "groups in tenancy where any {target.group.name = 'hermes-truenas-opentofu-s3', target.group.name = 'hermes-oci-opentofu-s3'}" in disabled_policy["statements"]
-    assert prefix + "policies in compartment id ${var.compartment_ocid} where target.policy.name = 'oci-control-server-vault-reader'" in disabled_policy["statements"]
+    assert prefix + "users in tenancy where any {target.user.name = 'hermes-truenas-opentofu-s3', target.user.name = 'hermes-oci-opentofu-s3'}" in policy["statements"]
+    assert prefix + "groups in tenancy where any {target.group.name = 'hermes-truenas-opentofu-s3', target.group.name = 'hermes-oci-opentofu-s3'}" in policy["statements"]
+    assert prefix + "policies in compartment id ${var.compartment_ocid} where target.policy.name = 'oci-control-server-vault-reader'" in policy["statements"]
 
 
 def test_iam_runbook_records_operator_gates_and_name_based_provider_contract():
@@ -239,5 +236,44 @@ def test_iam_runbook_records_operator_gates_and_name_based_provider_contract():
         "SECRET_BUNDLE_READ", "VAULT_READ", "GetSecretBundleByName",
         "remoteRef.key", "secret name", "GetVault", "separate approval",
         "no init", "no plan", "no apply", "prevent_destroy",
+        "control_cloudflare_secret_ocid", "byte-equality",
+        "operator-only", "desktop workspace", "unchanged",
     ):
         assert required in text, required
+
+
+def test_cloudflare_shared_raw_token_is_the_only_approved_automatic_deny_exception():
+    """The one operator-approved exception: ESO may read the existing shared
+    raw Cloudflare token only after the operator independently validates that
+    cert-manager, cloudflare-ddns and external-ns hold exactly equal api-token
+    bytevalues. It stays out of the automatic deny union; every other control
+    host credential remains automatically denied, and the explicit bootstrap
+    denylist is unchanged and still fails closed."""
+    denied = compact(blocks("locals")["talos_eso_bootstrap_secret_ocids"])
+    assert 'setunion(var.talos_eso_bootstrap_secret_ocids, toset(compact([' in denied
+    names = set(re.findall(r"var\.[A-Za-z0-9_]+", denied))
+    assert "var.control_cloudflare_secret_ocid" not in names
+    for still_denied in (
+        "var.control_hermes_dashboard_secret_ocid",
+        "var.control_omni_auth_secret_ocid",
+        "var.control_hermes_api_secret_ocid",
+        "var.control_hermes_github_app_key_secret_ocid",
+        "var.control_truenas_acme_secret_ocid",
+        "var.control_cloud_backup_secret_ocid",
+    ):
+        assert still_denied in names, still_denied
+    # The explicit operator-supplied denylist still blocks ESO's own signing-key
+    # bundle and any Git/SOPS bootstrap credential, disjoint from runtime IDs.
+    user = resources()[("oci_identity_domains_user", "talos_eso")]
+    lifecycle = user["lifecycle"][0]
+    conditions = {compact(p["condition"]) for p in lifecycle["precondition"]}
+    assert "${length(setintersection(var.talos_eso_runtime_secret_ocids, local.talos_eso_bootstrap_secret_ocids)) == 0}" in conditions
+    variables = blocks("variable")
+    assert variables["talos_eso_bootstrap_secret_ocids"]["default"] == []
+    # Nothing else about the ESO identity/policy changes: same four resources.
+    assert set(resources()) == {
+        ("oci_identity_domains_user", "talos_eso"),
+        ("oci_identity_domains_group", "talos_eso"),
+        ("oci_identity_domains_api_key", "talos_eso"),
+        ("oci_identity_policy", "talos_eso"),
+    }

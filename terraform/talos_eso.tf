@@ -52,8 +52,14 @@ variable "talos_eso_bootstrap_secret_ocids" {
 }
 
 locals {
+  # The one operator-approved exception: the existing host Cloudflare Vault
+  # secret holds only the raw shared api-token. Kubernetes
+  # cert-manager/cloudflare-api-token, cloudflare-ddns/cloudflare-ddns-secret
+  # and external-dns/external-dns-cloudflare hold exactly equal api-token
+  # bytevalues, so canonical reuse lets ESO read this existing shared secret
+  # once the operator independently validates that equality. It is therefore
+  # NOT auto-denied; every other control host credential below still is.
   talos_eso_bootstrap_secret_ocids = setunion(var.talos_eso_bootstrap_secret_ocids, toset(compact([
-    var.control_cloudflare_secret_ocid,
     var.control_hermes_dashboard_secret_ocid,
     var.control_omni_auth_secret_ocid,
     var.control_hermes_api_secret_ocid,
