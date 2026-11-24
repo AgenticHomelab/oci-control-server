@@ -107,8 +107,7 @@ def kustomization(name, secrets):
         'metadata': {'name': name, 'namespace': 'flux-system'},
         'spec': {'decryption': {'provider': 'sops'}},
         'status': {'inventory': {'entries': [
-            {'id': f'{ns}_{n}_Secret', 'version': 'v1',
-             'namespace': ns, 'name': n, 'kind': 'Secret'}
+            {'id': f'{ns}_{n}_Secret', 'v': 'v1'}
             for ns, n in secrets]}},
     }
 
@@ -191,9 +190,7 @@ class Fixture:
              'kind': 'Kustomization',
              'metadata': {'name': 'apps', 'namespace': 'flux-system'},
              'spec': {}, 'status': {'inventory': {'entries': [
-                 {'id': 'immich_immich-values__Secret', 'version': 'v1',
-                  'namespace': 'immich', 'name': 'immich-values',
-                  'kind': 'Secret'}]}}},
+                 {'id': 'immich_immich-values__Secret', 'v': 'v1'}]}}},
         ]
         self.oci_state.write_text(json.dumps({
             'tofu_plan_json': None, 'tofu_apply': False,
@@ -211,8 +208,9 @@ class Fixture:
         (ws / 'ansible').mkdir()
         (ws / 'ansible' / 'talos-secrets-bootstrap.yml').write_text(
             '# synthetic isolated play\n')
-        (ws / '.terraform').mkdir()
-        (ws / '.terraform' / 'environment').write_text('default\n')
+        (ws / 'terraform' / '.terraform').mkdir(parents=True)
+        (ws / 'terraform' / '.terraform' / 'environment').write_text(
+            'default\n')
         self.ws = ws
         subprocess.run(['git', 'init', '-q', str(ws)], check=True)
         subprocess.run(['git', '-C', str(ws), 'remote', 'add', 'origin',
@@ -332,6 +330,8 @@ class Fixture:
         tofu = textwrap.dedent(head.replace('TOOL', 'tofu')) + textwrap.dedent('''\
             if "init" in args:
                 sys.exit(0)
+            if "workspace" in args and "show" in args:
+                print("default"); sys.exit(0)
             if "plan" in args and "show" not in args:
                 Path(args[args.index("-out")+1]).write_bytes(b"SYNTHETIC-PLAN-BYTES")
                 sys.exit(0)

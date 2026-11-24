@@ -36,8 +36,9 @@ python3 scripts/eso-migration/eso_migrate.py bootstrap --config /protected/migra
   contract with the Secret's real keys. Review the draft, then point the
   config's `inventory` at it (or merge it into your reviewed copy).
 - **prepare** verifies the original git source (exact origin, clean
-  terraform tree, `.terraform/environment` = `default`, original S3
-  backend block with `use_lockfile = true` and exact bucket/key/region),
+  terraform tree, native `tofu workspace show` = default, `terraform/.terraform` initialized data directory (TF_DATA_DIR unset), original S3
+  backend block with `use_lockfile = true` (the bucket/key/region selectors
+  live in the existing initialized backend configuration, never touched here)),
   verifies the independent operator OCI **API-key** profile (matching root
   tenancy/compartment; `InstancePrincipal` and security-token profiles
   are refused (the existing `DEFAULT` profile is acceptable)) by an actual `iam user get`/`iam compartment get`,

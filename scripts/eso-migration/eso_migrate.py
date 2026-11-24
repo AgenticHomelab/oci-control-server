@@ -220,8 +220,7 @@ def load_config(path):
                 ('tenancy_ocid', 'compartment_ocid', 'region', 'vault_ocid',
                  'vault_key_ocid', 'operator_user_ocid')), E_SCHEMA)
     backend = expected.get('backend') or {}
-    require(all(isinstance(backend.get(k), str) and backend[k] for k in
-                ('bucket', 'key', 'region')), E_SCHEMA)
+    require(isinstance(backend, dict), E_SCHEMA)
     operator = cfg.get('operator') or {}
     require(isinstance(operator.get('config_file'), str)
             and isinstance(operator.get('profile'), str)
@@ -411,9 +410,18 @@ def kubectl(cfg, *args):
 
 
 def verify_workspace(cfg):
-    """Original git owner/root, initialized backend, default workspace."""
+    """Original git owner/root, initialized backend, default workspace.
+
+    Real environment evidence: the initialized OpenTofu data directory is
+    terraform/.terraform (TF_DATA_DIR unset); backend.tf holds only the s3
+    backend type and use_lockfile — the actual selectors live in the
+    existing local backend configuration from init, which is never changed
+    here. The active workspace is checked with the native
+    `tofu workspace show`.
+    """
     ws = Path(cfg['workspace'])
-    require(ws.is_dir() and (ws / '.terraform').is_dir(), E_WORKSPACE)
+    data_dir = ws / 'terraform' / '.terraform'
+    require(ws.is_dir() and data_dir.is_dir(), E_WORKSPACE)
     check_tool(cfg, 'git')
     origin = git(cfg, 'remote', 'get-url', 'origin').strip()
     require(origin.rstrip('/').endswith('/' + cfg['git_origin'])
@@ -423,20 +431,18 @@ def verify_workspace(cfg):
             .strip() == '', E_DIRTY)
     head = git(cfg, 'rev-parse', 'HEAD').strip()
     require(len(head) == 40, E_GIT)
-    env_file = ws / '.terraform' / 'environment'
-    require(env_file.is_file()
-            and env_file.read_text(encoding='utf-8').strip() == 'default',
-            E_ENVIRONMENT)
-    # Original backend lineage: s3 bucket/key/region with native locking on.
+    # Backend lineage without touching init or state: the block must
+    # still select the s3 backend with native locking on. The bucket/key/
+    # region selectors are deliberately NOT read from backend.tf — they
+    # live in the existing initialized backend configuration.
     backend_tf = (ws / 'terraform' / 'backend.tf').read_text(encoding='utf-8')
     require('backend "s3"' in backend_tf, E_BACKEND)
-    expected = cfg['expected']['backend']
     lock_part = backend_tf.split('use_lockfile', 1)
     lock_line = lock_part[1].splitlines()[0] if len(lock_part) == 2 else ''
     require(len(lock_part) == 2 and 'true' in lock_line, E_BACKEND)
-    for key in ('bucket', 'key', 'region'):
-        require(re.search('"' + re.escape(expected[key]) + '"', backend_tf)
-                is not None, E_BACKEND)
+    # Native workspace check against the initialized data directory.
+    workspace = tofu(cfg, 'workspace', 'show').strip()
+    require(workspace == 'default', E_ENVIRONMENT)
     return head
 
 
@@ -881,7 +887,11 @@ def resolve_reuse_entries(cfg, op_profile, inv):
 
 def sops_target_refs(cfg):
     """Current SOPS-delivered targets: Secrets in the status inventory of
-    every flux-system Kustomization with .spec.decryption."""
+    every flux-system Kustomization with .spec.decryption.
+
+    Real Flux status inventory entries carry only {id, v}; the id encodes
+    "namespace_name_group_kind" (e.g. "alloy_app_Secret").
+    """
     listing = parse_native_json(kubectl(cfg, 'get', 'kustomizations',
                                          '-n', 'flux-system', '-o', 'json'))
     require(isinstance(listing, dict), E_STATE)
@@ -894,13 +904,27 @@ def sops_target_refs(cfg):
         entries = ((item.get('status') or {}).get('inventory')
                    or {}).get('entries') or []
         for entry in entries:
-            if (isinstance(entry, dict) and entry.get('kind') == 'Secret'
-                    and entry.get('namespace') and entry.get('name')):
-                selector = entry['namespace'] + '/' + entry['name']
-                # The Flux bootstrap Secret is covered by the explicit
-                # flux bundle, never as a runtime target.
-                if selector != (FLUX_K8S_SECRET[0] + '/' + FLUX_K8S_SECRET[1]):
-                    refs.setdefault(selector)
+            if not isinstance(entry, dict) or not entry.get('id'):
+                continue
+            # Real Flux id shape: "namespace_name[_group]_kind", where the
+            # name may itself contain underscores; split only the fixed
+            # suffix (kind, optional group) off the end.
+            parts = str(entry['id']).rsplit('_', 3)
+            if len(parts) == 4:
+                namespace, name, _group, kind = parts
+            elif len(parts) == 3:
+                namespace, name, kind = parts
+            else:
+                continue
+            if kind != 'Secret':
+                continue
+            if not namespace or not name:
+                continue
+            selector = namespace + '/' + name
+            # The Flux bootstrap Secret is covered by the explicit
+            # flux bundle, never as a runtime target.
+            if selector != (FLUX_K8S_SECRET[0] + '/' + FLUX_K8S_SECRET[1]):
+                refs.setdefault(selector)
     return list(refs)
 
 
