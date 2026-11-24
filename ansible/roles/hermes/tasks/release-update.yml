@@ -141,6 +141,8 @@
       - /home/hermes/.local/bin/hermes
       - update
       - --plan
+      - --channel
+      - stable
   register: hermes_native_update_plan
   changed_when: false
   check_mode: false
