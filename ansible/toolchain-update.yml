@@ -1,0 +1,9 @@
+---
+# Deliberate operator-initiated management CLI reconciliation only.
+# Does not reconcile Docker, Omni, Hermes or other host services.
+- name: Update reviewed management CLIs only
+  hosts: control
+  become: true
+  gather_facts: true
+  roles:
+    - toolchain
