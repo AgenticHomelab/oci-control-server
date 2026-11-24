@@ -225,6 +225,30 @@
     hermes_update_completed: "{{ hermes_before_sha.stdout | trim != hermes_expected_sha }}"
   when: not ansible_check_mode
 
+- name: Read Hermes revision immediately after the native updater
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - rev-parse
+      - HEAD
+  register: hermes_post_update_revision
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Refuse to modify Matrix E2EE source on an unexpected Hermes revision
+  ansible.builtin.assert:
+    that:
+      - hermes_post_update_revision.stdout | trim == hermes_expected_sha
+    fail_msg: >-
+      Hermes updater left the checkout at a different commit than the
+      reviewed stable release. Inspect current checkout, stash and backups
+      before any recovery action; do not re-run the updater.
+  when: not ansible_check_mode
+
 - name: Reconcile reviewed Matrix overlay after the native update
   ansible.builtin.import_tasks: matrix-overlay.yml
   when: not ansible_check_mode
