@@ -24,13 +24,14 @@ full-cluster bootstrap, or continuous secret-sync daemon is involved.
   OCI CLI is already installed at `/opt/oci-cli/bin/oci` on the reviewed runner;
   it need not be on `PATH`. The implementation does not install dependencies.
 - Independently retained **operator API-key** OCI configuration, a named profile
-  other than `DEFAULT`, and its existing signing key. Config and key must be
+  and its existing signing key. Config and key must be
   regular, non-symlink files owned by the invoking user with no group/other
   permissions. The key path must be absolute. The CLI alone reads the key bytes.
 - The profile user must equal the explicit operator user and differ from the
   explicit ESO user. The operator and restored ESO fingerprints must also differ.
   `InstancePrincipal`, security-token profiles and inherited `OCI_*` auth,
-  endpoint or debug overrides are not accepted. OCI CLI RC loading is disabled.
+  endpoint or debug overrides are not accepted. The existing `DEFAULT`
+  profile is acceptable when the operator identity checks still match. OCI CLI RC loading is disabled.
 - The operator must already have approved read access to exactly the two selected
   OCI secret versions. Pin positive **integer version numbers**, not a moving
   `CURRENT`/`LATEST` stage. Returned secret IDs, version numbers, BASE64 envelope,

@@ -39,8 +39,8 @@ python3 scripts/eso-migration/eso_migrate.py bootstrap --config /protected/migra
   terraform tree, `.terraform/environment` = `default`, original S3
   backend block with `use_lockfile = true` and exact bucket/key/region),
   verifies the independent operator OCI **API-key** profile (matching root
-  tenancy/compartment; `InstancePrincipal`, security-token profiles and
-  `DEFAULT` are refused) by an actual `iam user get`/`iam compartment get`,
+  tenancy/compartment; `InstancePrincipal` and security-token profiles
+  are refused (the existing `DEFAULT` profile is acceptable)) by an actual `iam user get`/`iam compartment get`,
   then imports everything authorized into the **existing** Vault with
   create-once/reuse-equal semantics (equal existing content is reused,
   differing content fails closed — never overwrite, never rotate):
@@ -68,7 +68,7 @@ python3 scripts/eso-migration/eso_migrate.py bootstrap --config /protected/migra
   fingerprint; mismatch fails closed.
 - **verify** performs the IAM validation as the new ESO identity (signed
   with the custody key through a generated, protected ephemeral config):
-  GetVault success and by-name `GetSecretBundleByName` for every runtime
+  GetVault (`oci kms management vault get`) and by-name `GetSecretBundleByName` (`oci secrets secret-bundle get-secret-bundle-by-name`) for every runtime
   target **and** every reuse entry (exact secret-id match, CURRENT stage),
   plus read **denials** on both discovered bootstrap bundle OCIDs and the
   unrelated sentinel. A denial counts **only** when the OCI CLI error parses
@@ -87,8 +87,9 @@ python3 scripts/eso-migration/eso_migrate.py bootstrap --config /protected/migra
 ## Private inputs (outside Git, mode 0600)
 
 - **config** (`--config`): schema, explicit `approved: true`, workspace
-  path, expected git origin, expected tenancy/compartment/region/vault/
-  operator-user OCIDs, expected backend bucket/key/region, inventory path,
+  path, expected git origin, expected tenancy/compartment/region/vault/vault-key/
+  operator-user OCIDs (`vault_key_ocid` is the existing master key the
+  real `oci vault secret create-base64 --key-id` requires), expected backend bucket/key/region, inventory path,
   custody dir, operator OCI config+profile, absolute native tool paths,
   kubeconfig, explicit context. Optional: `reuse_hints`
   (`"namespace/name": {"ocid": <existing vault secret OCID>}`) for
@@ -124,8 +125,9 @@ parent's ExternalSecret generation consumes these shapes from the journal:
 - Refuses `init`/reconfigure/backend drift: never invokes `tofu init`, and
   the backend block must still be the original locked S3 backend.
 - Refuses dirty terraform trees, wrong git origin, wrong workspace
-  environment, InstancePrincipal/security-token/`DEFAULT` profiles,
+  environment, InstancePrincipal/security-token profiles,
   operator≠root-tenancy identity, ESO-user-as-operator identity.
+  The `DEFAULT` profile is allowed when those identity checks still pass.
 - Vault import is create-once or reuse-equal for **every** payload class
   (runtime targets, reuse entries, Flux bundle, ESO bundle); a differing
   existing bundle fails closed without printing values or hashes.

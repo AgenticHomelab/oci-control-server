@@ -135,7 +135,7 @@ class BootstrapTests(unittest.TestCase):
             {'approved': False}, {'approved': 'true'}, {'auth': 'instance_principal'},
             {'auth': 'InstancePrincipal'}, {'context': ''}, {'context': '-unsafe'},
             {'operator_user_ocid': self.inputs['eso_user_ocid']},
-            {'profile': 'DEFAULT'}, {'config_file': 'relative'}, {'kubeconfig': '/a/../b'},
+            {'profile': ''}, {'config_file': 'relative'}, {'kubeconfig': '/a/../b'},
             {'region': ''}, {'oci_cli': 'oci'}, {'kubectl': 'kubectl'},
             {'eso': {'secret_id': 'bad', 'version_number': 1}},
             {'flux': {'secret_id': self.inputs['flux']['secret_id'], 'version_number': 0}},
