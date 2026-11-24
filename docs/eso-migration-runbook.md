@@ -100,9 +100,10 @@ python3 scripts/eso-migration/eso_migrate.py bootstrap --config /protected/migra
   target **and** every reuse entry (exact secret-id match, CURRENT stage),
   plus read **denials** on both discovered bootstrap bundle OCIDs and the
   unrelated sentinel. A denial counts **only** when the OCI CLI error parses
-  as a real authorization failure (`NotAuthorizedOrNotFound` /
-  `NotAuthenticated`); any other failure (network, 5xx, malformed output)
-  fails the mode instead of being counted as a denial. Read-only: the ESO
+  as HTTP 404 `NotAuthorizedOrNotFound`, and the independent operator
+  successfully reads that same secret. CLI warnings before the structured
+  `ServiceError:` response are allowed. Authentication failures, network
+  errors, 5xx responses and malformed output are not proof of denial. Read-only: the ESO
   signer never writes, deletes or lists unrelated resources.
 - **bootstrap** materializes exactly the two pinned Secrets
   (`external-secrets/oci-vault-auth`, `flux-system/homelab-secrets-git`)

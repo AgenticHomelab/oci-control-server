@@ -42,7 +42,7 @@ Modes, in operator order:
              discovered bootstrap bundle OCIDs and the unrelated
              sentinel. Denials count only when the OCI CLI error parses
              as a real authorization failure code
-             (NotAuthorizedOrNotFound/NotAuthenticated); any other API
+             (404 NotAuthorizedOrNotFound); any other API
              failure fails the mode distinctly. Read-only.
   bootstrap  Materialize the two pinned K8s Secrets through the existing
              isolated Ansible play (ansible/talos-secrets-bootstrap.yml)
@@ -513,18 +513,24 @@ def oci_raw(cfg, op_profile, *args, timeout=300):
     return command_raw(argv, timeout=timeout)
 
 
-def _denial_payload_code(stderr):
-    """The parsed error code string from the CLI stderr, or None."""
+def _oci_error_payload(stderr):
+    """Parse a CLI service error, allowing preceding CLI warnings."""
     try:
-        # Real OCI CLI prefixes its JSON with "ServiceError:".
         raw = (stderr or '').strip()
-        if raw.startswith('ServiceError:'):
-            raw = raw[len('ServiceError:'):].lstrip()
+        markers = list(re.finditer(r'(?m)^ServiceError:[ \t]*', raw))
+        if markers:
+            if len(markers) != 1:
+                return {}
+            raw = raw[markers[0].end():].lstrip()
         payload = json.loads(raw)
     except (ValueError, TypeError, UnicodeError):
-        return None
-    if not isinstance(payload, dict):
-        return None
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _denial_payload_code(stderr):
+    """The parsed error code string from the CLI stderr, or None."""
+    payload = _oci_error_payload(stderr)
     code = payload.get('code')
     if not isinstance(code, str):
         nested = payload.get('error')
@@ -534,8 +540,12 @@ def _denial_payload_code(stderr):
 
 def denial_code(stderr):
     """The exact authorization failure code, or None when not a denial."""
-    code = _denial_payload_code(stderr)
-    return code if isinstance(code, str) and code in DENIAL_CODES else None
+    payload = _oci_error_payload(stderr)
+    # An authentication failure does not demonstrate resource isolation.
+    # Require the documented resource-access denial and HTTP status.
+    if payload.get('code') == 'NotAuthorizedOrNotFound' and payload.get('status') == 404:
+        return 'NotAuthorizedOrNotFound'
+    return None
 
 
 def authorization_denial(stderr):
@@ -1336,18 +1346,18 @@ def mode_verify(cfg, args=None):
                     + [journal['unrelated_sentinel_secret_ocid']])
     denial_codes = []
     for ocid_value in denied_ocids:
+        # Establish existence and independent operator access for each target.
+        rc, _out, _err = oci_raw(cfg, op_profile, 'secrets', 'secret-bundle',
+                                'get', '--secret-id', ocid_value)
+        require(rc == 0, 'operator positive control failed; diagnostics withheld')
         rc, _out, err = oci_raw(cfg, eso_profile, 'secrets', 'secret-bundle',
                                 'get', '--secret-id', ocid_value)
         if rc == 0:
             raise Fail(E_DENIAL)
-        if authorization_denial(err):
+        if rc == 1 and authorization_denial(err):
             denial_codes.append(denial_code(err))
             continue
         raise Fail(E_VERIFY_API)
-    # Positive control: the operator can still read one denied OCID by ID,
-    # proving the sentinel is not simply a nonexistent secret.
-    oci_raw(cfg, op_profile, 'secrets', 'secret-bundle', 'get',
-            '--secret-id', denied_ocids[0])
     emit({'ok': True, 'mode': 'verify',
           'runtime_verified': len(journal['runtime_targets']),
           'reuse_verified': len(journal.get('reuse_entries') or []),

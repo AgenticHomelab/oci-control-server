@@ -247,8 +247,10 @@ class Fixture:
             def deny_or_exit():
                 # Emit an OCI-style CLI error on stderr with a code field.
                 code = live.get("denial_code") or "NotAuthorizedOrNotFound"
+                status = live.get("denial_status", 404)
+                sys.stderr.write("Warning: synthetic CLI warning\\nServiceError:\\n")
                 sys.stderr.write(json.dumps(
-                    {"code": code, "message": "synthetic"}))
+                    {"code": code, "status": status, "message": "synthetic"}))
                 sys.exit(1)
             profile = args[args.index("--profile")+1] if "--profile" in args else "?"
             # vcmd is the service path derived per real CLI structure,
@@ -344,6 +346,8 @@ class Fixture:
             if vcmd == "secret-bundle" and "get" in args \\
                     and "get-by-name" not in args and "--secret-id" in args:
                 sid = args[args.index("--secret-id")+1]
+                if profile != "ESO_IDENTITY" and not live.get("operator_control_failure"):
+                    out({"data": {"secret-id": sid}})
                 if live.get("deny_success") and profile == "ESO_IDENTITY":
                     out({"data": {"secret-id": sid}})
                 deny_or_exit()
@@ -1031,9 +1035,30 @@ def test_verify_fails_on_non_authorization_api_error(fx):
 def test_verify_counts_real_authorization_denials(fx):
     assert fx.run('prepare', fx.make_config()).returncode == 0
     _applied(fx)
-    fx.live_set(denial_code='NotAuthenticated')
     result = fx.run('verify', fx.make_config())
     assert result.returncode == 0, result.stdout
+    assert json.loads(result.stdout)['denials_verified'] == 3
+
+
+@pytest.mark.parametrize(('code', 'status'), [
+    ('NotAuthenticated', 401),
+    ('NotAuthorizedOrNotFound', 500),
+])
+def test_verify_rejects_non_denial_status(fx, code, status):
+    assert fx.run('prepare', fx.make_config()).returncode == 0
+    _applied(fx)
+    fx.live_set(denial_code=code, denial_status=status)
+    result = fx.run('verify', fx.make_config())
+    assert result.returncode != 0
+
+
+def test_verify_requires_operator_positive_control(fx):
+    assert fx.run('prepare', fx.make_config()).returncode == 0
+    _applied(fx)
+    fx.live_set(operator_control_failure=True)
+    result = fx.run('verify', fx.make_config())
+    assert result.returncode != 0
+    assert 'operator positive control failed' in result.stdout
 
 
 def test_verify_requires_applied_journal(fx):
