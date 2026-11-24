@@ -91,10 +91,12 @@ approved operational path. ESO must never retrieve its own bootstrap key.
 In the pinned upstream `providers/v1/oracle/oracle.go`, `GetSecret` passes
 `remoteRef.key` as a **secret name** directly to `GetSecretBundleByName`, with the
 configured Vault ID. It does not first call GetSecret or ListSecrets for an
-explicit name. Therefore use the exact secret name in the ExternalSecret;
-**do not put its OCID in `remoteRef.key`**. The IAM allowlist is by secret OCID,
-not by the provider's name string; confirm this name-to-ID relationship outside
-OpenTofu before deployment.
+explicit name. The deployed app-local ExternalSecrets extract JSON-map bundles
+with `spec.dataFrom[].extract.key`; use the exact Vault secret **name** there,
+not its OCID. For an individual `spec.data[].remoteRef.key`, the same name-based
+provider contract applies. The IAM allowlist is by secret OCID, not by the
+provider's name string; confirm this name-to-ID relationship outside OpenTofu
+before deployment. See the [GitOps credential lifecycle](https://github.com/AgenticHomelab/talos-cluster/blob/main/docs/gitops.md#add-or-update-a-stable-runtime-credential).
 
 `Validate` calls `GetVault`. Without its permission the provider can return
 Unknown for authorization/not-found errors, which is why the separate, exact
