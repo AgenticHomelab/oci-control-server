@@ -45,7 +45,12 @@ python3 scripts/eso-migration/eso_migrate.py bootstrap --config /protected/migra
   names, identifiers or secret content. Runtime counts can be lower
   than inventory counts because equal payloads share a representative.
   Existing entries are not evidence of equality; prepare verifies content
-  in memory. Run with the same config:
+  in memory. Prepare uses the same complete paginated metadata listing
+  and matches exact names locally: OCI CLI can produce no JSON for
+  an empty server-side name filter. A missing or malformed complete
+  listing fails closed, rather than permitting creation. JSON parsing
+  errors report the operation and whether the output was empty or
+  invalid, without replaying it. Run with the same config:
 
   `python3 scripts/eso-migration/eso_migrate.py vault-status --config /protected/migrate.json`
 - **prepare** verifies the original git source (exact origin, clean

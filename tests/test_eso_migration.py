@@ -282,6 +282,12 @@ class Fixture:
                     sys.stderr.write("ServiceError:\\n" + json.dumps({
                         "code": live["list_error"], "message": "DO-NOT-PRINT"}))
                     sys.exit(1)
+                if live.get("list_empty_stdout"):
+                    sys.exit(0)
+                if live.get("list_invalid_stdout"):
+                    print("DO-NOT-PRINT"); sys.exit(0)
+                if live.get("list_invalid_metadata"):
+                    out({"data": [{"id": "synthetic"}]})
                 name = args[args.index("--name")+1] if "--name" in args else None
                 rows = [{"id": "ocid1.vaultsecret.eu-stockholm-1.v-" + n,
                          "secret-name": n,
@@ -291,6 +297,9 @@ class Fixture:
                     rows.append({"id": "%(shared)s",
                                  "secret-name": "%(shared_name)s",
                                  "lifecycle-state": "ACTIVE"})
+                # OCI CLI can suppress the entire output for empty results.
+                if not rows:
+                    sys.exit(0)
                 out({"data": rows})
             if vcmd == "secret" and "get" in args and "--secret-id" in args:
                 sid = args[args.index("--secret-id")+1]
@@ -724,6 +733,22 @@ def test_vault_status_reports_partial_import_without_bundle_reads(fx):
     assert fx.calls_of('kubectl') == []
 
 
+@pytest.mark.parametrize(('flag', 'message'), [
+    ('list_empty_stdout', 'empty JSON output'),
+    ('list_invalid_stdout', 'invalid JSON output'),
+    ('list_invalid_metadata', 'invalid metadata response'),
+])
+def test_prepare_rejects_unusable_vault_listing(fx, flag, message):
+    cfg = fx.make_config()
+    fx.live_set(**{flag: True})
+    result = fx.run('prepare', cfg)
+    assert result.returncode != 0
+    assert 'oci vault secret list' in result.stdout
+    assert message in result.stdout
+    assert 'DO-NOT-PRINT' not in result.stdout + result.stderr
+    assert not any('create-base64' in args for args in fx.calls_of('oci'))
+
+
 def test_prepare_native_failure_reports_only_safe_operation(fx):
     cfg = fx.make_config()
     fx.live_set(list_error='NotAuthorizedOrNotFound')
@@ -737,6 +762,11 @@ def test_prepare_native_failure_reports_only_safe_operation(fx):
 def test_prepare_idempotent_no_rotation_single_create(fx):
     cfg = fx.make_config()
     assert fx.run('prepare', cfg).returncode == 0
+    # The fake CLI emits no JSON for an empty filtered listing. Prepare
+    # must use the same unfiltered metadata read as vault-status instead.
+    listings = [args for args in fx.calls_of('oci')
+                if 'vault' in args and 'secret' in args and 'list' in args]
+    assert listings and all('--name' not in args for args in listings)
     key_path = Path(fx.custody) / 'eso-signing.pem'
     key_before = key_path.read_bytes()
     der = subprocess.check_output(
