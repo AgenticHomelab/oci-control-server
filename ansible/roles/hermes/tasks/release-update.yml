@@ -6,6 +6,7 @@
     that:
       - inventory_hostname == 'control-01'
       - hermes_release_version is match('^v[0-9]+\\.[0-9]+\\.[0-9]+$')
+      - hermes_release_version == 'v0.23.4'
     fail_msg: Only a reviewed vX.Y.Z Hermes release on control-01 is supported.
 
 - name: Read Hermes installation source
@@ -54,6 +55,12 @@
           ' M website/docs/user-guide/messaging/matrix.md',
           '?? plugins/platforms/matrix/direct_key_delivery.py',
           '?? tests/gateway/test_matrix_direct_key_delivery.py'
+        ] | sort) or
+        (hermes_checkout_status.stdout_lines | sort) ==
+        ([
+          ' M plugins/platforms/matrix/adapter.py',
+          '?? plugins/platforms/matrix/direct_key_delivery.py',
+          '?? tests/gateway/test_matrix_direct_key_delivery.py'
         ] | sort)
     fail_msg: >-
       Unexpected local source changes. Review and preserve the checkout
@@ -80,9 +87,14 @@
 - name: Refuse altered or unreviewed legacy Matrix source
   ansible.builtin.assert:
     that:
-      - hermes_legacy_patch_blobs.results[0].stdout is match('^a7d53d905f[0-9a-f]{30}$')
       - hermes_legacy_patch_blobs.results[1].stdout == '458e8012ba3b51da488d120fc4d951d7f6ced731'
-      - hermes_legacy_patch_blobs.results[2].stdout == '9f0165578dc9cf1de32768e060ae24d140dd4983'
+      - >-
+        ((hermes_checkout_status.stdout_lines | length) == 4 and
+         hermes_legacy_patch_blobs.results[0].stdout is match('^a7d53d905f[0-9a-f]{30}$') and
+         hermes_legacy_patch_blobs.results[2].stdout == '9f0165578dc9cf1de32768e060ae24d140dd4983') or
+        ((hermes_checkout_status.stdout_lines | length) == 3 and
+         hermes_legacy_patch_blobs.results[0].stdout == '6fa778e1cfbf584f950b627be633a08fbd10a841' and
+         hermes_legacy_patch_blobs.results[2].stdout == '18c1e8b16f6e038b8ccf69f61ddd5c137d9a1fa9')
     fail_msg: >-
       The legacy Matrix customization differs from the reviewed source.
       Preserve and inspect the exact changes before any upgrade.
