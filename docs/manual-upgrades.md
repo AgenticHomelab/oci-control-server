@@ -149,7 +149,11 @@ ansible-playbook -i <approved-inventory> hermes-update.yml -e hermes_update_revi
 ```
 
 The isolated play verifies the upstream source, reviewed stable tag and exact
-target Git commit. It accepts a **clean** checkout or only the exact identified
+target Git commit. It also resolves the **installed updater's native stable
+channel target** and refuses to start a migration if that commit differs from
+the GitHub release tag. This gate prevents a mismatch between the native
+channel resolver and the published GitHub release from moving the checkout
+to an unreviewed intermediate version. It accepts a **clean** checkout or only the exact identified
 legacy Matrix modification on control-01, checked against reviewed Git blob
 identities; all unexpected changes block the upgrade. This is needed for the
 first transition, because the installed source contains an opt-in Matrix E2EE
