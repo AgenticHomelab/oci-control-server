@@ -14,8 +14,6 @@ cloudflare_api_token: >-
   {{ lookup('ansible.builtin.env', 'CLOUDFLARE_API_TOKEN') }}
 
 # Hermes release ownership moved to group_vars/all/versions.yml.
-hermes_node_version: "26.7.0"
-hermes_npm_version: "12.0.2"
 # Verified App authentication; signing PEM was bootstrapped by the operator.
 hermes_github_app_enabled: true
 # Pinned Vault metadata verified during bootstrap; host IAM/retrieval stay disabled.
