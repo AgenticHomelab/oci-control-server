@@ -1,0 +1,47 @@
+---
+# A normal host apply never upgrades Hermes. It only checks the reviewed tag.
+- name: Require a reviewed stable Hermes release
+  ansible.builtin.assert:
+    that:
+      - hermes_release_version is match('^v[0-9]+\\.[0-9]+\\.[0-9]+$')
+    fail_msg: Select a published stable Hermes release (vX.Y.Z).
+
+- name: Read installed Hermes revision
+  become: true
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - rev-parse
+      - HEAD
+  register: hermes_installed_revision
+  changed_when: false
+  check_mode: false
+
+- name: Resolve approved release in the installed checkout
+  become: true
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - rev-parse
+      - --verify
+      - "refs/tags/{{ hermes_release_version }}^{commit}"
+  register: hermes_local_release_revision
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Require the approved Hermes release without changing the checkout
+  ansible.builtin.assert:
+    that:
+      - hermes_local_release_revision.rc == 0
+      - hermes_installed_revision.stdout | trim == hermes_local_release_revision.stdout | trim
+    fail_msg: >-
+      Installed Hermes does not match the reviewed stable release
+      {{ hermes_release_version }}. Do not use the normal host playbook to
+      upgrade it. Follow docs/manual-upgrades.md and hermes-update.yml.
