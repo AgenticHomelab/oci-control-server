@@ -1,0 +1,22 @@
+---
+# Reviewed software versions for control-01. Renovate creates PRs only.
+# Ansible loads this automatically from group_vars/all; the single control
+# inventory currently has no other hosts. Keep these pins out of the
+# scanner-reviewed credential/metadata file group_vars/control.yml.
+# renovate: datasource=github-tags depName=kubernetes/kubernetes
+kubectl_version: "v1.37.1"
+
+# renovate: datasource=github-releases depName=siderolabs/talos
+talosctl_version: "v1.13.5"
+
+# renovate: datasource=github-releases depName=fluxcd/flux2
+flux_version: "2.9.6"
+
+# renovate: datasource=github-releases depName=helm/helm
+helm_version: "4.3.0"
+
+# renovate: datasource=docker depName=ghcr.io/siderolabs/omni
+omni_version: "v1.12.3"
+
+# renovate: datasource=docker depName=ghcr.io/dexidp/dex
+omni_dex_version: "v2.41.1"
