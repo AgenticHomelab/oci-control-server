@@ -25,6 +25,15 @@ state are managed by their separate owners.
   identity, and all resource addresses must remain unchanged when selecting
   or changing an execution path.
 
+## Talos runtime credentials
+
+This repository owns the dedicated OCI ESO IAM metadata
+([IAM runbook](docs/talos-eso-iam.md)) and the isolated
+[bootstrap recovery playbook](docs/talos-secrets-bootstrap.md). Flux owns the
+declarations and ESO synchronizes stable Kubernetes credentials from OCI Vault.
+The 2026-11-24 migration is complete; see [historical acceptance](docs/eso-migration-runbook.md).
+No routine migration or new secret-sync daemon is needed.
+
 ## Offline review
 
 Review `terraform/` and `ansible/` as separate owners. CI performs offline

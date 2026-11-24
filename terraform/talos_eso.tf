@@ -37,7 +37,7 @@ variable "talos_eso_runtime_secret_ocids" {
 }
 
 variable "talos_eso_bootstrap_secret_ocids" {
-  description = "Explicit bootstrap secret OCIDs to deny ESO, including its separately managed signing-key bundle and any Git/SOPS bootstrap credentials; existing control host credential IDs are denied automatically too."
+  description = "Explicit bootstrap secret OCIDs to deny ESO, including its separately managed signing-key bundle and the private Git deploy credential; existing control host credential IDs are denied automatically too."
   type        = set(string)
   default     = []
   nullable    = false
