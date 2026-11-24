@@ -40,33 +40,43 @@
   args:
     creates: /var/lib/systemd/linger/hermes
 
-- name: Install Hermes Agent
+- name: Check whether Hermes is installed
+  ansible.builtin.stat:
+    path: /home/hermes/.local/bin/hermes
+  register: hermes_executable
+
+- name: Verify bootstrap target is the published stable release
+  when: not hermes_executable.stat.exists
+  block:
+    - name: Query official Hermes latest release
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/NousResearch/hermes-agent/releases/latest
+        return_content: true
+      register: hermes_bootstrap_latest
+      check_mode: false
+      changed_when: false
+
+    - name: Refuse an unreviewed bootstrap version
+      ansible.builtin.assert:
+        that:
+          - hermes_bootstrap_latest.json.tag_name == hermes_release_version
+          - not hermes_bootstrap_latest.json.prerelease | bool
+        fail_msg: >-
+          The reviewed Hermes release is no longer the latest stable release.
+          Review the release before bootstrapping.
+
+- name: Install the reviewed Hermes stable release on first bootstrap only
   become_user: hermes
   ansible.builtin.shell: |
     set -o pipefail
-    curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/{{ hermes_install_commit }}/scripts/install.sh \
-      | bash -s -- --non-interactive --skip-browser --commit {{ hermes_install_commit }}
+    curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/{{ hermes_release_version }}/scripts/install.sh \\
+      | bash -s -- --non-interactive --skip-browser --channel stable
   args:
     executable: /bin/bash
     creates: /home/hermes/.local/bin/hermes
 
-- name: Read installed Hermes revision without updating it
-  become: true
-  become_user: hermes
-  ansible.builtin.command:
-    # The git module can reconcile checkout state; this audit must only read.
-    cmd: git -C /home/hermes/.hermes/hermes-agent rev-parse HEAD  # noqa command-instead-of-module
-  register: hermes_installed_revision
-  changed_when: false
-  check_mode: false
-
-- name: Require the reviewed Hermes revision
-  ansible.builtin.assert:
-    that:
-      - hermes_installed_revision.stdout | trim == hermes_install_commit
-    fail_msg: >-
-      Hermes revision differs from the reviewed deployment. Investigate before
-      updating the pin or reinstalling; normal Ansible never upgrades Hermes.
+- name: Verify the installed Hermes release without updating it
+  ansible.builtin.import_tasks: release-verify.yml
 
 - name: Secure Hermes dashboard credential parent directory
   tags: [hermes_dashboard_directory_fix, hermes_dashboard_credentials]
