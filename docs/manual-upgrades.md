@@ -11,6 +11,10 @@ No second runner, automatic deployment, or unattended container updater exists.
 
 - Omni and Dex image tags in `ansible/group_vars/all/versions.yml`;
 - kubectl, talosctl, Flux CLI and Helm version pins in that file;
+  Renovate names these as host CLI updates (`kubectl`, `talosctl`,
+  `flux-cli`, `helm-cli`), while upstream release lookups retain their real
+  Kubernetes, Talos, Flux and Helm repository identifiers. These proposals
+  do not upgrade Kubernetes or Talos cluster nodes;
 - GitHub Actions SHA references; and
 - OpenTofu provider constraints and lockfile through Renovate's Terraform manager
   using `registry.opentofu.org`. The OpenTofu CLI version constraint is excluded.
