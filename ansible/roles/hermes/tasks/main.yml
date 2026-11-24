@@ -100,63 +100,8 @@
   ansible.builtin.import_tasks: dashboard-credentials.yml
   tags: [hermes_dashboard_credentials]
 
-- name: Install Hermes dashboard systemd service
-  tags: [hermes_dashboard_credentials]
-  ansible.builtin.template:
-    src: hermes-dashboard.service.j2
-    dest: /home/hermes/.config/systemd/user/hermes-dashboard.service
-    owner: hermes
-    group: hermes
-    mode: "0644"
-  register: hermes_dashboard_unit
-
-- name: Install Hermes gateway systemd service
-  ansible.builtin.template:
-    src: hermes-gateway.service.j2
-    dest: /home/hermes/.config/systemd/user/hermes-gateway.service
-    owner: hermes
-    group: hermes
-    mode: "0644"
-  register: hermes_gateway_unit
-
-- name: Get Hermes user ID
-  tags: [hermes_dashboard_credentials]
-  ansible.builtin.command:
-    cmd: id -u hermes
-  register: hermes_uid
-  changed_when: false
-  check_mode: false
-
-- name: Enable and start Hermes dashboard
-  tags: [hermes_dashboard_credentials]
-  become_user: hermes
-  environment:
-    XDG_RUNTIME_DIR: "/run/user/{{ hermes_uid.stdout | trim }}"
-  ansible.builtin.systemd_service:
-    name: hermes-dashboard.service
-    scope: user
-    daemon_reload: true
-    enabled: true
-    state: >-
-      {{
-        'restarted'
-        if (hermes_dashboard_env.changed | default(false))
-        or (hermes_dashboard_vault_refresh.changed | default(false))
-        or hermes_dashboard_unit.changed
-        else 'started'
-      }}
-
-- name: Enable and start Hermes gateway
-  become: true
-  become_user: hermes
-  environment:
-    XDG_RUNTIME_DIR: "/run/user/{{ hermes_uid.stdout | trim }}"
-  ansible.builtin.systemd_service:
-    name: hermes-gateway.service
-    scope: user
-    daemon_reload: "{{ hermes_gateway_unit.changed }}"
-    enabled: true
-    state: "{{ 'restarted' if hermes_gateway_unit.changed else 'started' }}"
+- name: Reconcile Hermes-owned runtime paths and service units
+  ansible.builtin.import_tasks: runtime-units.yml
 
 # Explicit post-acceptance cleanup only. A systemd "started" result cannot
 # prove interactive auth and Chat work. Retain the guard for rollback until
