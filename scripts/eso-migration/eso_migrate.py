@@ -215,11 +215,12 @@ def command_raw(argv, payload=None, timeout=600):
     return (result.returncode, result.stdout, result.stderr)
 
 
-def parse_native_json(content):
+def parse_native_json(content, operation='native command'):
     try:
         return json.loads(content)
     except (ValueError, TypeError, UnicodeError):
-        raise Fail(E_STATE) from None
+        reason = 'empty JSON output' if isinstance(content, str) and not content.strip() else 'invalid JSON output'
+        raise native_failure(operation, reason) from None
 
 
 # =====================================================================
@@ -653,16 +654,30 @@ def oci_vault_bundle_by_name(cfg, op_profile, vault_ocid, name):
     data = parse_native_json(oci(
         cfg, op_profile, 'secrets', 'secret-bundle',
         'get-secret-bundle-by-name',
-        '--vault-id', vault_ocid, '--secret-name', name))
+        '--vault-id', vault_ocid, '--secret-name', name),
+        'oci secrets secret-bundle get-secret-bundle-by-name')
     return (data or {}).get('data') or {}
 
 
-def oci_vault_list(cfg, op_profile, vault_ocid, compartment_ocid, name):
+def oci_vault_metadata(cfg, op_profile, vault_ocid, compartment_ocid):
+    # OCI CLI can omit JSON entirely for an empty name-filtered result.
+    # List the existing Vault's metadata and filter locally. Never interpret
+    # a missing/malformed response as permission to create a secret.
     data = parse_native_json(oci(
         cfg, op_profile, 'vault', 'secret', 'list',
         '--vault-id', vault_ocid, '--compartment-id', compartment_ocid,
-        '--name', name, '--all'))
-    return (data or {}).get('data') or []
+        '--all'), 'oci vault secret list')
+    rows = data.get('data') if isinstance(data, dict) else None
+    require(isinstance(rows, list) and all(
+        isinstance(row, dict) and isinstance(row.get('secret-name'), str)
+        and isinstance(row.get('id'), str) for row in rows),
+        'oci vault secret list: invalid metadata response')
+    return rows
+
+
+def oci_vault_list(cfg, op_profile, vault_ocid, compartment_ocid, name):
+    rows = oci_vault_metadata(cfg, op_profile, vault_ocid, compartment_ocid)
+    return [row for row in rows if row['secret-name'] == name]
 
 
 def key_fingerprint(cfg, custody, key_path):
@@ -684,7 +699,8 @@ def key_fingerprint(cfg, custody, key_path):
 def kube_secret_raw(cfg, namespace, name):
     """Read one K8s Secret -o json into memory (read-only)."""
     data = parse_native_json(kubectl(cfg, 'get', 'secret', name,
-                                     '-n', namespace, '-o', 'json'))
+                                     '-n', namespace, '-o', 'json'),
+                             'kubectl get secret')
     require(isinstance(data, dict)
             and isinstance(data.get('data'), dict)
             and isinstance(data.get('metadata'), dict), E_KUBE)
@@ -764,7 +780,8 @@ def vault_create_or_reuse_equal(cfg, op_profile, inv, name, payload_text,
             '--from-json', 'file://' + str(content_path),
             '--description', description,
             '--wait-for-state', 'ACTIVE', '--max-wait-seconds', '240',
-            '--wait-interval-seconds', '5', timeout=360))
+            '--wait-interval-seconds', '5', timeout=360),
+            'oci vault secret create-base64')
     secret_ocid = ((created or {}).get('data') or {}).get('id')
     require(isinstance(secret_ocid, str) and OCID.match(secret_ocid),
             E_VAULT)
@@ -886,7 +903,7 @@ def resolve_reuse_entries(cfg, op_profile, inv):
     for entry in inv['reuse_entries']:
         data = parse_native_json(oci(
             cfg, op_profile, 'vault', 'secret', 'get',
-            '--secret-id', entry['ocid']))
+            '--secret-id', entry['ocid']), 'oci vault secret get')
         meta = (data or {}).get('data') or {}
         name = meta.get('secret-name')
         require(isinstance(name, str) and name
@@ -1101,12 +1118,8 @@ def mode_vault_status(cfg, args=None):
     inv = load_inventory(cfg['inventory'], cfg)
     profile = operator_profile(cfg)
     verify_operator_identity(cfg, profile)
-    data = parse_native_json(oci(
-        cfg, profile, 'vault', 'secret', 'list',
-        '--vault-id', cfg['expected']['vault_ocid'],
-        '--compartment-id', inv['compartment_ocid'], '--all'))
-    rows = (data or {}).get('data')
-    require(isinstance(rows, list), E_STATE)
+    rows = oci_vault_metadata(cfg, profile, cfg['expected']['vault_ocid'],
+                              inv['compartment_ocid'])
     states = {'ACTIVE', 'CREATING', 'FAILED', 'UPDATING', 'DELETED',
               'DELETING', 'PENDING_DELETION', 'SCHEDULING_DELETION',
               'CANCELLING_DELETION'}
