@@ -149,11 +149,11 @@ resource "oci_identity_policy" "hermes_oci_plan" {
   statements = [
     # Tenancy metadata and exact existing managed IAM identities/policies.
     "Allow dynamic-group id ${oci_identity_dynamic_group.hermes_oci_plan[0].id} to inspect compartments in tenancy",
-    "Allow dynamic-group id ${oci_identity_dynamic_group.hermes_oci_plan[0].id} to inspect users in tenancy where any {target.user.name = 'hermes-truenas-opentofu-s3', target.user.name = 'hermes-oci-opentofu-s3'}",
-    "Allow dynamic-group id ${oci_identity_dynamic_group.hermes_oci_plan[0].id} to inspect groups in tenancy where any {target.group.name = 'hermes-truenas-opentofu-s3', target.group.name = 'hermes-oci-opentofu-s3'}",
+    "Allow dynamic-group id ${oci_identity_dynamic_group.hermes_oci_plan[0].id} to inspect users in tenancy where any {target.user.name = 'hermes-truenas-opentofu-s3', target.user.name = 'hermes-oci-opentofu-s3'${var.talos_eso_enabled ? ", target.user.name = 'talos-eso-vault-reader'" : ""}}",
+    "Allow dynamic-group id ${oci_identity_dynamic_group.hermes_oci_plan[0].id} to inspect groups in tenancy where any {target.group.name = 'hermes-truenas-opentofu-s3', target.group.name = 'hermes-oci-opentofu-s3'${var.talos_eso_enabled ? ", target.group.name = 'talos-eso-vault-reader'" : ""}}",
     "Allow dynamic-group id ${oci_identity_dynamic_group.hermes_oci_plan[0].id} to inspect dynamic-groups in tenancy where any {target.dynamic-group.name = 'oci-control-server-vault-reader', target.dynamic-group.name = 'oci-control-server-hermes-opentofu-plan'}",
     "Allow dynamic-group id ${oci_identity_dynamic_group.hermes_oci_plan[0].id} to inspect policies in tenancy where any {target.policy.name = 'hermes-truenas-opentofu-s3', target.policy.name = 'hermes-oci-opentofu-s3', target.policy.name = 'hermes-oci-opentofu-plan-reader'}",
-    "Allow dynamic-group id ${oci_identity_dynamic_group.hermes_oci_plan[0].id} to inspect policies in compartment id ${var.compartment_ocid} where target.policy.name = 'oci-control-server-vault-reader'",
+    "Allow dynamic-group id ${oci_identity_dynamic_group.hermes_oci_plan[0].id} to inspect policies in compartment id ${var.compartment_ocid} where ${var.talos_eso_enabled ? "any {target.policy.name = 'oci-control-server-vault-reader', target.policy.name = 'talos-eso-vault-reader'}" : "target.policy.name = 'oci-control-server-vault-reader'"}",
     # These metadata reads do not grant domain administration.
     "Allow dynamic-group id ${oci_identity_dynamic_group.hermes_oci_plan[0].id} to read domains in tenancy where target.domain.name = 'Default'",
     # The only OCI infrastructure compartment managed by this repository.

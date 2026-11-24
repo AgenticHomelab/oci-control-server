@@ -1,0 +1,17 @@
+---
+# The helper receives selectors only. It never returns credential material.
+- name: Validate pinned recovery inputs or materialize the two bootstrap Secrets
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ role_path }}/files/bootstrap.py"
+      - "{{ '--check' if ansible_check_mode else '--apply' }}"
+    stdin: "{{ talos_secrets_bootstrap | default({}) | to_json }}"
+    stdin_add_newline: false
+    expand_argument_vars: false
+  register: talos_bootstrap_result
+  changed_when: (talos_bootstrap_result.stdout | from_json).changed | bool
+  # Run the helper's metadata-only branch in check mode, not its credential path.
+  check_mode: false
+  no_log: true
+  diff: false
