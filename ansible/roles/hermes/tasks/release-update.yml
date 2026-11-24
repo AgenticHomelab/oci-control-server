@@ -43,11 +43,241 @@
   changed_when: false
   check_mode: false
 
-- name: Require a clean Hermes source checkout
+- name: Require a clean checkout or the identified legacy Matrix customizations
   ansible.builtin.assert:
     that:
-      - hermes_checkout_status.stdout | trim == ''
-    fail_msg: Review local Hermes checkout changes before any upgrade.
+      - >-
+        (hermes_checkout_status.stdout_lines | sort) == [] or
+        (hermes_checkout_status.stdout_lines | sort) ==
+        ([
+          ' M plugins/platforms/matrix/adapter.py',
+          ' M website/docs/user-guide/messaging/matrix.md',
+          '?? plugins/platforms/matrix/direct_key_delivery.py',
+          '?? tests/gateway/test_matrix_direct_key_delivery.py'
+        ] | sort)
+    fail_msg: >-
+      Unexpected local source changes. Review and preserve the checkout
+      before updating; never discard unknown user modifications.
+
+- name: Identify the legacy Matrix adapter and module by Git blob
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - hash-object
+      - "{{ item }}"
+  loop:
+    - plugins/platforms/matrix/adapter.py
+    - plugins/platforms/matrix/direct_key_delivery.py
+    - tests/gateway/test_matrix_direct_key_delivery.py
+  register: hermes_legacy_patch_blobs
+  changed_when: false
+  check_mode: false
+  when: hermes_checkout_status.stdout | trim != ''
+
+- name: Refuse altered or unreviewed legacy Matrix source
+  ansible.builtin.assert:
+    that:
+      - hermes_legacy_patch_blobs.results[0].stdout is match('^a7d53d905f[0-9a-f]{30}
+- name: Read current Hermes checkout revision
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - /home/hermes/.hermes/hermes-agent
+      - rev-parse
+      - HEAD
+  register: hermes_before_sha
+  changed_when: false
+  check_mode: false
+
+- name: Look up the latest published stable Hermes release
+  ansible.builtin.uri:
+    url: https://api.github.com/repos/NousResearch/hermes-agent/releases/latest
+    return_content: true
+  register: hermes_latest_release
+  changed_when: false
+  check_mode: false
+
+- name: Require the reviewed release to match upstream stable
+  ansible.builtin.assert:
+    that:
+      - hermes_latest_release.json.tag_name == hermes_release_version
+      - not hermes_latest_release.json.prerelease | bool
+      - not hermes_latest_release.json.draft | bool
+    fail_msg: >-
+      A different stable Hermes release is now available. Review the
+      update, adjust the pinned version through a PR, and retry.
+
+- name: Resolve the reviewed tag to its exact upstream commit
+  become_user: hermes
+  ansible.builtin.command:
+    argv:
+      - git
+      - ls-remote
+      - --tags
+      - https://github.com/NousResearch/hermes-agent.git
+      - "refs/tags/{{ hermes_release_version }}"
+      - "refs/tags/{{ hermes_release_version }}^{}"
+  register: hermes_upstream_tag_refs
+  changed_when: false
+  check_mode: false
+
+- name: Pick the peeled commit for an annotated release tag
+  ansible.builtin.set_fact:
+    hermes_release_ref_lines: >-
+      {{
+        hermes_upstream_tag_refs.stdout_lines |
+        select('search', 'refs/tags/' ~ (hermes_release_version | regex_escape) ~ '\\^\\{\\}$') |
+        list
+      }}
+
+- name: Resolve the expected release SHA
+  ansible.builtin.set_fact:
+    hermes_release_ref_line: >-
+      {{
+        (hermes_release_ref_lines | first | default('')) or
+        (hermes_upstream_tag_refs.stdout_lines |
+         select('search', 'refs/tags/' ~ (hermes_release_version | regex_escape) ~ '$') |
+         first | default(''))
+      }}
+
+- name: Extract the expected Git commit
+  ansible.builtin.set_fact:
+    hermes_expected_sha: "{{ hermes_release_ref_line.split()[0] | default('') }}"
+
+- name: Require an exact upstream release commit
+  ansible.builtin.assert:
+    that:
+      - hermes_expected_sha is match('^[0-9a-f]{40}$')
+    fail_msg: Could not resolve the reviewed Hermes release tag to a commit.
+
+- name: Read Hermes service user ID
+  ansible.builtin.command:
+    argv: [id, -u, hermes]
+  register: hermes_upgrade_uid
+  changed_when: false
+  check_mode: false
+
+- name: Inspect the native Hermes update plan
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+    HERMES_HOME: /home/hermes/.hermes
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_upgrade_uid.stdout | trim }}"
+  ansible.builtin.command:
+    argv:
+      - /home/hermes/.local/bin/hermes
+      - update
+      - --plan
+      - --channel
+      - stable
+  register: hermes_native_update_plan
+  changed_when: false
+  check_mode: false
+
+- name: Summarize the proposed Hermes transition
+  ansible.builtin.debug:
+    msg: >-
+      Hermes {{ hermes_before_sha.stdout | trim }} to
+      {{ hermes_release_version }} ({{ hermes_expected_sha }}).
+      In check mode this is a preview only. Review the native plan,
+      independent recovery and a recent protected backup before apply.
+
+- name: Require explicit approval for a live Hermes version change
+  ansible.builtin.assert:
+    that:
+      - hermes_update_reviewed | default(false) | bool
+    fail_msg: Set hermes_update_reviewed=true only for the approved production upgrade.
+  when:
+    - not ansible_check_mode
+    - hermes_before_sha.stdout | trim != hermes_expected_sha
+
+- name: Run Hermes upstream stable updater with its own full pre-update backup
+  become_user: hermes
+  environment:
+    HOME: /home/hermes
+    HERMES_HOME: /home/hermes/.hermes
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_upgrade_uid.stdout | trim }}"
+  ansible.builtin.command:
+    argv:
+      - /home/hermes/.local/bin/hermes
+      - update
+      - --channel
+      - stable
+      - --yes
+      - --backup
+      - --keep-stash
+      - --no-gateway-restart
+  async: 3600
+  poll: 15
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - hermes_before_sha.stdout | trim != hermes_expected_sha
+
+- name: Mark that the Hermes dashboard must load the new release
+  ansible.builtin.set_fact:
+    hermes_update_completed: "{{ hermes_before_sha.stdout | trim != hermes_expected_sha }}"
+  when: not ansible_check_mode
+
+- name: Reconcile version-controlled Matrix source customizations
+  ansible.builtin.import_tasks: matrix-overlay.yml
+  when: not ansible_check_mode
+
+- name: Verify installed Hermes after the native update
+  ansible.builtin.import_tasks: release-verify.yml
+  when: not ansible_check_mode
+
+- name: Reconcile Hermes systemd units with the updated runtime lock
+  ansible.builtin.import_tasks: runtime-units.yml
+  when: not ansible_check_mode
+
+- name: Restart Hermes services on the reviewed code and Matrix overlay
+  become_user: hermes
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_upgrade_uid.stdout | trim }}"
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    scope: user
+    state: restarted
+  loop:
+    - hermes-gateway.service
+    - hermes-dashboard.service
+  when:
+    - not ansible_check_mode
+    - >-
+      (hermes_before_sha.stdout | trim != hermes_expected_sha) or
+      (hermes_matrix_module_result.changed | default(false)) or
+      (hermes_matrix_adapter_result.changed | default(false))
+      or (hermes_matrix_test_result.changed | default(false))
+
+- name: Require Hermes gateway and dashboard services active
+  become_user: hermes
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_upgrade_uid.stdout | trim }}"
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - is-active
+      - "{{ item }}"
+  loop:
+    - hermes-gateway.service
+    - hermes-dashboard.service
+  register: hermes_update_service_status
+  changed_when: false
+  check_mode: false
+)
+      - hermes_legacy_patch_blobs.results[1].stdout == '458e8012ba3b51da488d120fc4d951d7f6ced731'
+      - hermes_legacy_patch_blobs.results[2].stdout == '9f0165578dc9cf1de32768e060ae24d140dd4983'
+    fail_msg: >-
+      The legacy Matrix customization differs from the reviewed source.
+      Preserve and inspect the exact changes before any upgrade.
+  when: hermes_checkout_status.stdout | trim != ''
 
 - name: Read current Hermes checkout revision
   become_user: hermes
