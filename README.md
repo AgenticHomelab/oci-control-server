@@ -34,6 +34,13 @@ declarations and ESO synchronizes stable Kubernetes credentials from OCI Vault.
 The 2026-11-24 migration is complete; see [historical acceptance](docs/eso-migration-runbook.md).
 No routine migration or new secret-sync daemon is needed.
 
+## Manual dependency upgrades
+
+[Manual control-01 upgrades](docs/manual-upgrades.md) documents the
+review-only Renovate dependency PRs and scoped Ansible deployment entrypoints.
+Merging a PR does not upgrade the running host. Production reconciliations
+and OpenTofu applies remain separately authorized.
+
 ## Offline review
 
 Review `terraform/` and `ansible/` as separate owners. CI performs offline
