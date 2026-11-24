@@ -136,3 +136,20 @@ def test_hermes_release_update_is_isolated_and_not_automatic():
     verify = (ROLE / "tasks/release-verify.yml").read_text()
     assert "refs/tags/{{ hermes_release_version }}^{commit}" in verify
     assert "hermes_installed_revision.stdout" in verify
+
+def test_hermes_runtime_comes_from_upstream_pm_lock():
+    normal = (ROLE / "tasks/main.yml").read_text()
+    upgrade = (ROLE / "tasks/release-update.yml").read_text()
+    units = (ROLE / "tasks/runtime-units.yml").read_text()
+    gateway = (ROLE / "templates/hermes-gateway.service.j2").read_text()
+    vars_file = (ANSIBLE / "group_vars/control.yml").read_text()
+
+    assert "import_tasks: runtime-units.yml" in normal
+    assert "import_tasks: runtime-units.yml" in upgrade
+    assert "/pm/lock.json" in units
+    assert "hermes_pm_runtime.packages.node.version" in units
+    assert "hermes_pm_runtime.packages.npm.version" in units
+    assert "hermes_pm_runtime.packages.node.version" in gateway
+    assert "hermes_pm_runtime.packages.npm.version" in gateway
+    assert "hermes_node_version:" not in vars_file
+    assert "hermes_npm_version:" not in vars_file
