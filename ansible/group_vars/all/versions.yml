@@ -23,4 +23,4 @@ hermes_release_version: "v0.23.4"
 omni_version: "v1.12.3"
 
 # renovate: datasource=docker depName=ghcr.io/dexidp/dex
-omni_dex_version: "v2.41.1"
+omni_dex_version: "v2.46.1"
