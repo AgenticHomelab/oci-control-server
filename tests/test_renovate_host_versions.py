@@ -48,6 +48,20 @@ def test_only_supported_host_pins_are_extracted():
 
 
 
+def test_talosctl_cli_tracks_the_deployed_talos_minor_and_has_scoped_install_tag():
+    versions = yaml.safe_load(
+        (ROOT / "ansible/group_vars/all/versions.yml").read_text()
+    )
+    # The current talos-home nodes run v1.14.x; keep the installed CLI on that
+    # compatible minor. A deliberate cluster version change must review this.
+    assert re.fullmatch(r"v1\.14\.\d+", versions["talosctl_version"])
+    tasks = (ROOT / "ansible/roles/toolchain/tasks/main.yml").read_text()
+    task = tasks.split("- name: Install talosctl", 1)[1].split("- name:", 1)[0]
+    assert "tags: [talosctl]" in task
+    assert "{{ talosctl_version }}" in task
+    assert "checksum: \"sha256:" in task
+
+
 def test_hermes_uses_only_stable_release_tags():
     config = json.loads((ROOT / "renovate.json").read_text())
     rules = [
