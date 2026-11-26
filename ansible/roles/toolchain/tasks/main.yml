@@ -35,6 +35,7 @@
     mode: "0755"
     owner: root
     group: root
+  tags: [talosctl]
 
 - name: Create Flux installation directory
   ansible.builtin.file:

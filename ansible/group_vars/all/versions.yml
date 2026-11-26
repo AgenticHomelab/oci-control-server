@@ -7,7 +7,7 @@
 kubectl_version: "v1.37.1"
 
 # renovate: datasource=github-releases depName=siderolabs/talos
-talosctl_version: "v1.13.5"
+talosctl_version: "v1.14.6"
 
 # renovate: datasource=github-releases depName=fluxcd/flux2
 flux_version: "2.9.6"
